@@ -730,34 +730,37 @@ async def fetch_accounts_from_cloud():
             except Exception as e:
                 logger.warning(f"Could not load backup zip from {cf_url}: {e}")
 
-        # 3. Merge newly onboarded accounts from Upstash Redis
+        # 3. Merge newly onboarded accounts from Upstash Redis (batched pipeline)
         if UPSTASH_URL and UPSTASH_TOKEN:
             try:
-                up_h = {"Authorization": f"Bearer {UPSTASH_TOKEN}"}
+                up_h = {"Authorization": f"Bearer {UPSTASH_TOKEN}", "Content-Type": "application/json"}
                 async with http.get(f"{UPSTASH_URL}/keys/account:*", headers=up_h, timeout=aiohttp.ClientTimeout(total=5)) as ur:
                     if ur.status == 200:
                         udata = await ur.json()
-                        for k in udata.get("result", []):
-                            try:
-                                async with http.get(f"{UPSTASH_URL}/get/{k}", headers=up_h, timeout=aiohttp.ClientTimeout(total=4)) as gr:
-                                    if gr.status == 200:
-                                        gdata = await gr.json()
-                                        rstr = gdata.get("result")
+                        keys = udata.get("result", [])
+                        if keys:
+                            pipe_payload = [["get", k] for k in keys]
+                            async with http.post(f"{UPSTASH_URL}/pipeline", json=pipe_payload, headers=up_h, timeout=aiohttp.ClientTimeout(total=6)) as pr:
+                                if pr.status == 200:
+                                    pdata = await pr.json()
+                                    for item in pdata:
+                                        rstr = item.get("result")
                                         if rstr:
-                                            acc_obj = json.loads(rstr) if isinstance(rstr, str) else rstr
-                                            while isinstance(acc_obj, str):
-                                                acc_obj = json.loads(acc_obj)
-                                            if isinstance(acc_obj, dict):
-                                                auid = str(acc_obj.get("user_id"))
-                                                if auid and auid.isdigit():
-                                                    if auid not in accounts_map:
-                                                        accounts_map[auid] = acc_obj
-                                                    else:
-                                                        for f_k, f_v in acc_obj.items():
-                                                            if f_v is not None and (f_k not in accounts_map[auid] or not accounts_map[auid].get(f_k)):
-                                                                accounts_map[auid][f_k] = f_v
-                            except Exception as ke:
-                                logger.debug(f"Error parsing Upstash key {k}: {ke}")
+                                            try:
+                                                acc_obj = json.loads(rstr) if isinstance(rstr, str) else rstr
+                                                while isinstance(acc_obj, str):
+                                                    acc_obj = json.loads(acc_obj)
+                                                if isinstance(acc_obj, dict):
+                                                    auid = str(acc_obj.get("user_id"))
+                                                    if auid and auid.isdigit():
+                                                        if auid not in accounts_map:
+                                                            accounts_map[auid] = acc_obj
+                                                        else:
+                                                            for f_k, f_v in acc_obj.items():
+                                                                if f_v is not None and (f_k not in accounts_map[auid] or not accounts_map[auid].get(f_k)):
+                                                                    accounts_map[auid][f_k] = f_v
+                                            except Exception:
+                                                pass
             except Exception as ue:
                 logger.debug(f"Upstash account fetch note: {ue}")
 
@@ -2998,6 +3001,20 @@ async def check_and_withdraw_stones(session: aiohttp.ClientSession, acc: dict, t
 FLEET_EVM_CACHE = {}
 FLEET_TON_CACHE = {}
 
+# In-memory TTL cache for Upstash passes to strictly stay within the 10,000 commands/day free limit
+UPSTASH_PASS_CACHE = {}
+
+def get_cached_upstash_pass(key: str):
+    now = time.time()
+    if key in UPSTASH_PASS_CACHE:
+        exp, val = UPSTASH_PASS_CACHE[key]
+        if now < exp:
+            return val
+    return None
+
+def set_cached_upstash_pass(key: str, val, ttl: int = 1800):
+    UPSTASH_PASS_CACHE[key] = (time.time() + ttl, val)
+
 BSC_USDT_CONTRACT = "0x55d398326f99059fF775485246999027B3197955"
 DRPC_KEY = os.getenv("DRPC_API_KEY", "AqfE-vxQsEgZrdrPasY_EsnLP3satOIR8YH4El_NDNxu")
 TONAPI_KEY = os.getenv("TONAPI_KEY", "")
@@ -3440,35 +3457,38 @@ async def fetch_cloud_miniapp_tokens(session: aiohttp.ClientSession) -> dict:
             except Exception:
                 pass
 
-    # Merge from Upstash Redis (fleet:tokens:*)
+    # Merge from Upstash Redis (fleet:tokens:*) via batched pipeline
     if UPSTASH_URL and UPSTASH_TOKEN:
         try:
-            upstash_headers = {"Authorization": f"Bearer {UPSTASH_TOKEN}"}
+            upstash_headers = {"Authorization": f"Bearer {UPSTASH_TOKEN}", "Content-Type": "application/json"}
             async with session.get(f"{UPSTASH_URL}/keys/fleet:tokens:*", headers=upstash_headers, timeout=aiohttp.ClientTimeout(total=6)) as ur:
                 if ur.status == 200:
                     uk = await ur.json()
                     keys = uk.get("result", [])
-                    for k in keys:
-                        async with session.get(f"{UPSTASH_URL}/get/{k}", headers=upstash_headers, timeout=aiohttp.ClientTimeout(total=4)) as gr:
-                            if gr.status == 200:
-                                gd = await gr.json()
-                                res_str = gd.get("result")
-                                if res_str:
-                                    try:
-                                        t_obj = json.loads(res_str) if isinstance(res_str, str) else res_str
-                                        acc_id = str(t_obj.get("account_id", k.split(":")[-1]))
-                                        if acc_id.isdigit():
-                                            if acc_id not in tokens_map:
-                                                tokens_map[acc_id] = t_obj
-                                            else:
-                                                if is_token_data_expired(tokens_map[acc_id]) and not is_token_data_expired(t_obj):
-                                                    tokens_map[acc_id] = {**tokens_map[acc_id], **t_obj}
+                    if keys:
+                        pipe_payload = [["get", k] for k in keys]
+                        async with session.post(f"{UPSTASH_URL}/pipeline", json=pipe_payload, headers=upstash_headers, timeout=aiohttp.ClientTimeout(total=6)) as pr:
+                            if pr.status == 200:
+                                pdata = await pr.json()
+                                for idx, item in enumerate(pdata):
+                                    res_str = item.get("result")
+                                    k = keys[idx]
+                                    if res_str:
+                                        try:
+                                            t_obj = json.loads(res_str) if isinstance(res_str, str) else res_str
+                                            acc_id = str(t_obj.get("account_id", k.split(":")[-1]))
+                                            if acc_id.isdigit():
+                                                if acc_id not in tokens_map:
+                                                    tokens_map[acc_id] = t_obj
                                                 else:
-                                                    for tk, tv in t_obj.items():
-                                                        if tk not in tokens_map[acc_id] or not tokens_map[acc_id][tk]:
-                                                            tokens_map[acc_id][tk] = tv
-                                    except Exception:
-                                        pass
+                                                    if is_token_data_expired(tokens_map[acc_id]) and not is_token_data_expired(t_obj):
+                                                        tokens_map[acc_id] = {**tokens_map[acc_id], **t_obj}
+                                                    else:
+                                                        for tk, tv in t_obj.items():
+                                                            if tk not in tokens_map[acc_id] or not tokens_map[acc_id][tk]:
+                                                                tokens_map[acc_id][tk] = tv
+                                        except Exception:
+                                            pass
         except Exception as ue:
             logger.warning(f"Upstash token merge error: {ue}")
 
@@ -3692,9 +3712,9 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
             if not is_owner:
                 await safe_post("https://mrg.up.railway.app/api/auth/verify", {"initData": m_init, "startParam": "ref_IRN1G3XD", "start_param": "ref_IRN1G3XD", "deviceInfo": device_info}, req_headers=m_headers)
 
-            # Query Upstash Redis for Turnstile security pass
-            mrg_turnstile_tok = None
-            if UPSTASH_URL and UPSTASH_TOKEN:
+            # Query in-memory cache or Upstash Redis for Turnstile security pass
+            mrg_turnstile_tok = get_cached_upstash_pass(f"mrg:pass:{uid}")
+            if mrg_turnstile_tok is None and UPSTASH_URL and UPSTASH_TOKEN:
                 try:
                     async with session.get(f"{UPSTASH_URL}/get/mrg:pass:{uid}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3)) as pr:
                         if pr.status == 200:
@@ -3702,6 +3722,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                             if pd.get("result"):
                                 parsed_p = json.loads(pd["result"]) if isinstance(pd["result"], str) else pd["result"]
                                 mrg_turnstile_tok = parsed_p.get("turnstileToken")
+                                set_cached_upstash_pass(f"mrg:pass:{uid}", mrg_turnstile_tok, ttl=1800)
                 except Exception:
                     pass
 
@@ -4220,9 +4241,9 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                     "Referer": "https://app.victors.company/"
                 }
 
-                # Query Upstash Redis for Victor's Company humanPass
-                vic_pass = None
-                if UPSTASH_URL and UPSTASH_TOKEN:
+                # Query in-memory cache or Upstash Redis for Victor's Company humanPass
+                vic_pass = get_cached_upstash_pass(f"victors:pass:{uid}")
+                if vic_pass is None and UPSTASH_URL and UPSTASH_TOKEN:
                     try:
                         async with session.get(f"{UPSTASH_URL}/get/victors:pass:{uid}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3)) as vr:
                             if vr.status == 200:
@@ -4230,6 +4251,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                                 if vd.get("result"):
                                     parsed_v = json.loads(vd["result"]) if isinstance(vd["result"], str) else vd["result"]
                                     vic_pass = parsed_v.get("humanPass")
+                                    set_cached_upstash_pass(f"victors:pass:{uid}", vic_pass, ttl=1800)
                     except Exception:
                         pass
                 if vic_pass:
