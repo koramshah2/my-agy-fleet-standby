@@ -642,7 +642,8 @@ async def collect_tokens(request: Request):
 
                 tokens = await extract_tokens_for_account(acc)
                 if tokens:
-                    collected_batch[uid] = tokens
+                    act_uid = str(tokens.get("account_id") or acc.get("user_id") or uid)
+                    collected_batch[act_uid] = tokens
                     LAST_BATCH_RUN["collected"] = len(collected_batch)
                     await sync_account_tokens_to_clouds(tokens)
 
@@ -4533,7 +4534,7 @@ async def run_cloud_fleet_farming_cycle(session: aiohttp.ClientSession = None, a
                 uid_str = str(a_dict.get("user_id"))
                 has_any_token = any(k.endswith("_init_data") and bool(v) for k, v in t_dict.items())
                 all_expired = is_token_data_expired(t_dict, max_age_hours=22.0)
-                if (not has_any_token or all_expired) and (a_dict.get("session_string") or a_dict.get("session")) and uid_str != "6727787768":
+                if (not has_any_token or all_expired) and (a_dict.get("session_string") or a_dict.get("session")):
                     try:
                         fresh_toks = await asyncio.wait_for(extract_tokens_for_account(a_dict), timeout=45.0)
                         if fresh_toks:
@@ -4636,12 +4637,11 @@ async def api_farm_single_account(uid: str, request: Request):
             tokens_map = await fetch_cloud_miniapp_tokens(session)
             acc_tok = tokens_map.get(str(uid), {})
             if not acc_tok or not any(k.endswith("_init_data") for k in acc_tok.keys()):
-                if str(uid) != "6727787768":
-                    fresh = await extract_tokens_for_account(target_acc)
-                    if fresh:
-                        acc_tok = fresh
-                        await sync_account_tokens_to_clouds(fresh)
-                        await bootstrap_account_mining(target_acc, fresh)
+                fresh = await extract_tokens_for_account(target_acc)
+                if fresh:
+                    acc_tok = fresh
+                    await sync_account_tokens_to_clouds(fresh)
+                    await bootstrap_account_mining(target_acc, fresh)
 
             if not acc_tok:
                 return {"ok": False, "message": "Failed to extract WebApp tokens for account", "uid": uid}
