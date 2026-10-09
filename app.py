@@ -4272,15 +4272,20 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                     "Referer": "https://app.victors.company/"
                 }
                 # 1. Login with startParam to bind referral code
+                login_ok = False
+                human_required = False
                 l_code, l_d = await safe_post(
                     "https://server.victors.company/api/auth/login",
                     json_data={"startParam": VICTORS_REFERRAL_CODE, "turnstileToken": None},
                     req_headers=v_h
                 )
-                if l_d and isinstance(l_d, dict):
+                if l_code in (200, 201) and l_d and isinstance(l_d, dict):
+                    login_ok = True
                     hp = l_d.get("humanPass") or (l_d.get("data", {}).get("humanPass") if isinstance(l_d.get("data"), dict) else None)
                     if hp:
                         v_h["x-human-pass"] = str(hp)
+                elif l_code == 403 or (l_d and isinstance(l_d, dict) and l_d.get("code") == "HUMAN_REQUIRED"):
+                    human_required = True
 
                 # 2. Me profile
                 await jitter(0.5, 1.2)
@@ -4336,8 +4341,11 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 except Exception:
                     pass
 
-                bal_str = f" (lvl: {lvl}, bal: {me.get('miningBalance', 0)})" if me else " (ok)"
-                status["bots"]["victors"] = f"farmed{bal_str}"
+                if human_required and not me:
+                    status["bots"]["victors"] = "human_pass_required (Turnstile needed)"
+                else:
+                    bal_str = f" (lvl: {lvl}, bal: {me.get('miningBalance', 0)})" if me else (" (ok)" if login_ok else " (auth_failed)")
+                    status["bots"]["victors"] = f"farmed{bal_str}"
                 return
             except Exception as e:
                 status["bots"]["victors"] = f"api_error: {format_error(e)}"
@@ -4372,6 +4380,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 lvl = m_obj.get("level", 1)
 
                 # 2. Mining claim / start
+                wallet_required = False
                 sess_id = mining.get("sessionId")
                 if sess_id:
                     await jitter(0.8, 1.8)
@@ -4382,18 +4391,22 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                     )
                     if c_code in (200, 201) or (c_d and isinstance(c_d, dict) and c_d.get("error", {}).get("code") == "MINING_SESSION_ALREADY_CLAIMED"):
                         await jitter(0.8, 1.6)
-                        await safe_post(
+                        st_c, st_d = await safe_post(
                             "https://vyro.run.place/api/mining/start",
                             json_data={"idempotencyKey": str(uuid.uuid4())},
                             req_headers=vy_h
                         )
+                        if st_c == 409 or (st_d and isinstance(st_d, dict) and st_d.get("error", {}).get("code") == "MINING_WALLET_REQUIRED"):
+                            wallet_required = True
                 else:
                     await jitter(0.8, 1.8)
-                    await safe_post(
+                    st_c, st_d = await safe_post(
                         "https://vyro.run.place/api/mining/start",
                         json_data={"idempotencyKey": str(uuid.uuid4())},
                         req_headers=vy_h
                     )
+                    if st_c == 409 or (st_d and isinstance(st_d, dict) and st_d.get("error", {}).get("code") == "MINING_WALLET_REQUIRED"):
+                        wallet_required = True
 
                 # 3. Tasks
                 await jitter(0.8, 1.6)
@@ -4418,8 +4431,11 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 await safe_post("https://vyro.run.place/api/referrals/claim", json_data={"kind": "DIRECT", "idempotencyKey": str(uuid.uuid4())}, req_headers=vy_h)
                 await safe_post("https://vyro.run.place/api/referrals/claim", json_data={"kind": "MINING", "idempotencyKey": str(uuid.uuid4())}, req_headers=vy_h)
 
-                bal_str = f" (lvl: {lvl}, speed: {m_obj.get('currentSpeed', 0)})" if m_obj else " (ok)"
-                status["bots"]["vyro"] = f"farmed{bal_str}"
+                if wallet_required:
+                    status["bots"]["vyro"] = f"wallet_required (TonConnect needed, lvl: {lvl})"
+                else:
+                    bal_str = f" (lvl: {lvl}, speed: {m_obj.get('currentSpeed', 0)})" if m_obj else " (ok)"
+                    status["bots"]["vyro"] = f"farmed{bal_str}"
                 return
             except Exception as e:
                 status["bots"]["vyro"] = f"api_error: {format_error(e)}"
@@ -5163,11 +5179,7 @@ CHANNEL_WHITELIST = {
     "stoneswithestand",
     "mrgminer",
     "mrgfun",
-    "art_airdrop",
-    "apexminer_official",
-    "apexminergroup",
     "ailabrobotnews",
-    "ailabrobotpayouts",
     "ultrawallet",
     "ultrawalletofficial",
     "gramworkers",
