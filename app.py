@@ -1451,7 +1451,8 @@ async def bootstrap_account_mining(acc_entry: dict, tokens: dict):
             try:
                 uw_init = tokens["ultrawallet_init_data"]
                 uw_base = "https://wallet.trxvault.top/api"
-                async with http.post(f"{uw_base}/telegramLogin", json={"initData": uw_init, "refBy": "6727787768"}, timeout=aiohttp.ClientTimeout(total=8)) as r:
+                ref_by_val = "" if is_master else "6727787768"
+                async with http.post(f"{uw_base}/telegramLogin", json={"initData": uw_init, "refBy": ref_by_val}, timeout=aiohttp.ClientTimeout(total=8)) as r:
                     if r.status == 200:
                         ud = await r.json()
                         cust_tok = ud.get("token")
@@ -3968,7 +3969,8 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
             if not id_tok:
                 for uw_att in range(3):
                     await jitter(1.5 + uw_att * 2.0, 3.5 + uw_att * 2.5)
-                    st_lg, ud = await safe_post(f"{uw_base}/telegramLogin", {"initData": uw_init, "refBy": "6727787768"}, req_headers=uw_origin_h)
+                    ref_by_uw = "" if is_owner else "6727787768"
+                    st_lg, ud = await safe_post(f"{uw_base}/telegramLogin", {"initData": uw_init, "refBy": ref_by_uw}, req_headers=uw_origin_h)
                     if ud and isinstance(ud, dict):
                         cust_tok = ud.get("token")
                         if cust_tok:
