@@ -439,13 +439,10 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         tokens["atf_init_data"] = tok
 
     # 3. Victor's Company (@VictorsCompanybot)
-    v_param = None if is_master else VICTORS_REFERRAL_CODE
+    v_param = VICTORS_REFERRAL_CODE
     try:
         b_vic = await client.get_entity(VICTORS_BOT)
-        if v_param:
-            await client.send_message(b_vic, f"/start {v_param}")
-        else:
-            await client.send_message(b_vic, "/start")
+        await client.send_message(b_vic, f"/start {v_param}")
     except Exception:
         pass
     tok = await extract_bot_webapp_token(client, VICTORS_BOT, start_param=v_param, default_url="https://app.victors.company/", candidate_short_names=["app", "play"])
@@ -453,13 +450,10 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         tokens["victors_init_data"] = tok
 
     # 4. VyroDrop (@vyrodrop_bot)
-    vy_param = None if is_master else VYRO_REFERRAL_CODE
+    vy_param = VYRO_REFERRAL_CODE
     try:
         b_vy = await client.get_entity(VYRO_BOT)
-        if vy_param:
-            await client.send_message(b_vy, f"/start {vy_param}")
-        else:
-            await client.send_message(b_vy, "/start")
+        await client.send_message(b_vy, f"/start {vy_param}")
     except Exception:
         pass
     tok = await extract_bot_webapp_token(client, VYRO_BOT, start_param=vy_param, default_url="https://vyro.run.place/", candidate_short_names=["app", "vyro", "play", "mine"])
