@@ -4225,13 +4225,20 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                     await safe_post("https://server.victors.company/api/me/tutorial", json_data={}, req_headers=v_h)
 
                 # Connect TON wallet to qualify recruit & unlock Level 1 Miner
-                v_ton_entry = FLEET_TON_WALLETS.get(str(uid)) if isinstance(FLEET_TON_WALLETS, dict) else None
+                v_ton_entry = (acc.get("ton_wallet") or {}).get("address")
+                if not v_ton_entry:
+                    try:
+                        if os.path.exists(os.path.join(BASE_DIR, "fleet_ton_wallets.json")):
+                            with open(os.path.join(BASE_DIR, "fleet_ton_wallets.json"), "r", encoding="utf-8") as tf:
+                                t_data = json.load(tf)
+                                raw_w = t_data.get(uid) or t_data.get(str(uid))
+                                v_ton_entry = raw_w.get("address") if isinstance(raw_w, dict) else raw_w
+                    except Exception:
+                        pass
                 if v_ton_entry and me and not me.get("walletAddress"):
-                    w_addr = v_ton_entry.get("address") if isinstance(v_ton_entry, dict) else v_ton_entry
-                    if w_addr:
-                        await safe_post("https://server.victors.company/api/wallet/connect", json_data={"address": w_addr}, req_headers=v_h)
-                        await jitter(0.5, 1.0)
-                        await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": "connect-wallet"}, req_headers=v_h)
+                    await safe_post("https://server.victors.company/api/wallet/connect", json_data={"address": v_ton_entry}, req_headers=v_h)
+                    await jitter(0.5, 1.0)
+                    await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": "connect-wallet"}, req_headers=v_h)
 
                 # 2. Daily checkin
                 await jitter(0.6, 1.5)
