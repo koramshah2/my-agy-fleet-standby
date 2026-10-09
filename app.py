@@ -4187,3 +4187,1354 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
         status["bots"]["finvora"] = "skipped (no initData)"
 
+    # 8. Victor's Company (@VictorsCompanybot)
+    async def _farm_victors():
+        if tokens.get("victors_init_data"):
+            try:
+                v_init = tokens["victors_init_data"]
+                v_h = {
+                    **headers,
+                    "Authorization": f"tma {v_init}",
+                    "Origin": "https://app.victors.company",
+                    "Referer": "https://app.victors.company/"
+                }
+
+                # Query Upstash Redis for Victor's Company humanPass
+                vic_pass = None
+                if UPSTASH_URL and UPSTASH_TOKEN:
+                    try:
+                        async with session.get(f"{UPSTASH_URL}/get/victors:pass:{uid}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3)) as vr:
+                            if vr.status == 200:
+                                vd = await vr.json()
+                                if vd.get("result"):
+                                    parsed_v = json.loads(vd["result"]) if isinstance(vd["result"], str) else vd["result"]
+                                    vic_pass = parsed_v.get("humanPass")
+                    except Exception:
+                        pass
+                if vic_pass:
+                    v_h["x-human-pass"] = str(vic_pass)
+
+                # 1. Verify profile using humanPass
+                await jitter(0.5, 1.2)
+                m_code, m_d = await safe_get("https://server.victors.company/api/me", req_headers=v_h)
+                me = (m_d.get("user") or m_d) if (m_d and isinstance(m_d, dict)) else {}
+                lvl = me.get("level", 1)
+                human_required = (not vic_pass) or (m_code in (401, 403)) or (isinstance(m_d, dict) and m_d.get("code") == "HUMAN_REQUIRED")
+
+                if me and not me.get("tutorialCompleted"):
+                    await safe_post("https://server.victors.company/api/me/tutorial", json_data={}, req_headers=v_h)
+
+                # Connect TON wallet to qualify recruit & unlock Level 1 Miner
+                v_ton_entry = FLEET_TON_WALLETS.get(str(uid)) if isinstance(FLEET_TON_WALLETS, dict) else None
+                if v_ton_entry and me and not me.get("walletAddress"):
+                    w_addr = v_ton_entry.get("address") if isinstance(v_ton_entry, dict) else v_ton_entry
+                    if w_addr:
+                        await safe_post("https://server.victors.company/api/wallet/connect", json_data={"address": w_addr}, req_headers=v_h)
+                        await jitter(0.5, 1.0)
+                        await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": "connect-wallet"}, req_headers=v_h)
+
+                # 2. Daily checkin
+                await jitter(0.6, 1.5)
+                await safe_post("https://server.victors.company/api/checkin", json_data={}, req_headers=v_h)
+
+                # 3. Mining claim
+                await jitter(0.8, 1.8)
+                await safe_post("https://server.victors.company/api/mining/claim", json_data={}, req_headers=v_h)
+
+                # 4. Levels unlock
+                unlocked = me.get("unlockedLevel", lvl)
+                if unlocked > lvl:
+                    await jitter(0.5, 1.2)
+                    await safe_post("https://server.victors.company/api/levels/unlock", json_data={"level": unlocked}, req_headers=v_h)
+
+                # 5. Tasks
+                await jitter(0.8, 1.6)
+                _, t_d = await safe_get("https://server.victors.company/api/tasks", req_headers=v_h)
+                if t_d and isinstance(t_d, dict):
+                    tasks = t_d.get("tasks", [])
+                    if isinstance(tasks, list):
+                        for t in tasks:
+                            if isinstance(t, dict) and t.get("id") and not t.get("claimed"):
+                                await jitter(0.4, 0.9)
+                                await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": t["id"]}, req_headers=v_h)
+
+                # 6. Referral claim bonus & commission
+                await jitter(0.6, 1.4)
+                await safe_post("https://server.victors.company/api/referral/claim-bonus", json_data={}, req_headers=v_h)
+                await safe_post("https://server.victors.company/api/referral/claim-commission", json_data={}, req_headers=v_h)
+
+                # 7. Arcade Minigame Mining (Play 1 run)
+                try:
+                    _, a_d = await safe_get("https://server.victors.company/api/arcade", req_headers=v_h)
+                    if a_d and isinstance(a_d, dict) and a_d.get("runsLeft", 0) > 0:
+                        st_c, _ = await safe_post("https://server.victors.company/api/arcade/mine/start", json_data={"tool": "pickaxe", "items": []}, req_headers=v_h)
+                        if st_c in (200, 201):
+                            for d in range(4):
+                                await jitter(0.4, 0.9)
+                                _, d_res = await safe_post("https://server.victors.company/api/arcade/mine/dig", json_data={"x": 4, "y": d}, req_headers=v_h)
+                                if not d_res or (isinstance(d_res, dict) and d_res.get("result") == "bust"):
+                                    break
+                            await safe_post("https://server.victors.company/api/arcade/mine/end", json_data={}, req_headers=v_h)
+                except Exception:
+                    pass
+
+                if human_required and not me:
+                    status["bots"]["victors"] = "human_pass_required (Turnstile needed)"
+                else:
+                    bal_str = f" (lvl: {lvl}, bal: {me.get('miningBalance', 0)})" if me else " (farmed)"
+                    status["bots"]["victors"] = f"farmed{bal_str}"
+                return
+                return
+            except Exception as e:
+                status["bots"]["victors"] = f"api_error: {format_error(e)}"
+                return
+
+        status["bots"]["victors"] = "skipped (no initData)"
+
+    # 9. VyroDrop (@vyrodrop_bot)
+    async def _farm_vyro():
+        if tokens.get("vyro_init_data"):
+            try:
+                vy_init = tokens["vyro_init_data"]
+                vy_h = {
+                    **headers,
+                    "Authorization": f"tma {vy_init}",
+                    "X-Vyro-UI-Contract": "claim-inactivity-v1",
+                    "X-Vyro-Market-Balances": "2",
+                    "X-Vyro-Dex": "1",
+                    "Referer": "https://vyro.run.place/"
+                }
+                import uuid
+
+                # 1. Bootstrap
+                b_code, b_d = await safe_get("https://vyro.run.place/api/bootstrap", req_headers=vy_h)
+                if not b_d or not isinstance(b_d, dict):
+                    status["bots"]["vyro"] = f"skipped (bootstrap {b_code or 'error'})"
+                    return
+
+                u_obj = b_d.get("user", {})
+                m_obj = b_d.get("miner", {})
+                mining = b_d.get("mining") or {}
+                lvl = m_obj.get("level", 1)
+
+                # 2. Mining claim / start
+                wallet_required = False
+                sess_id = mining.get("sessionId")
+                if sess_id:
+                    await jitter(0.8, 1.8)
+                    c_code, c_d = await safe_post(
+                        "https://vyro.run.place/api/mining/claim",
+                        json_data={"sessionId": sess_id, "idempotencyKey": str(uuid.uuid4())},
+                        req_headers=vy_h
+                    )
+                    if c_code in (200, 201) or (c_d and isinstance(c_d, dict) and c_d.get("error", {}).get("code") == "MINING_SESSION_ALREADY_CLAIMED"):
+                        await jitter(0.8, 1.6)
+                        st_c, st_d = await safe_post(
+                            "https://vyro.run.place/api/mining/start",
+                            json_data={"idempotencyKey": str(uuid.uuid4())},
+                            req_headers=vy_h
+                        )
+                        if st_c == 409 or (st_d and isinstance(st_d, dict) and st_d.get("error", {}).get("code") == "MINING_WALLET_REQUIRED"):
+                            wallet_required = True
+                else:
+                    await jitter(0.8, 1.8)
+                    st_c, st_d = await safe_post(
+                        "https://vyro.run.place/api/mining/start",
+                        json_data={"idempotencyKey": str(uuid.uuid4())},
+                        req_headers=vy_h
+                    )
+                    if st_c == 409 or (st_d and isinstance(st_d, dict) and st_d.get("error", {}).get("code") == "MINING_WALLET_REQUIRED"):
+                        wallet_required = True
+
+                # 3. Tasks
+                await jitter(0.8, 1.6)
+                t_headers = {**vy_h, "x-vyro-tasks-protocol": "2"}
+                _, t_d = await safe_get("https://vyro.run.place/api/tasks?limit=8", req_headers=t_headers)
+                if t_d and isinstance(t_d, dict):
+                    tasks = t_d.get("tasks", [])
+                    if isinstance(tasks, list):
+                        for t in tasks:
+                            if isinstance(t, dict) and t.get("id") and t.get("state") != "CLAIMED":
+                                tid = t["id"]
+                                await jitter(0.4, 0.9)
+                                await safe_post(f"https://vyro.run.place/api/tasks/{tid}/open", json_data={}, req_headers=t_headers)
+                                await jitter(1.0, 1.8)
+                                _, v_d = await safe_post(f"https://vyro.run.place/api/tasks/{tid}/verify", json_data={}, req_headers=t_headers)
+                                if v_d and isinstance(v_d, dict) and v_d.get("task", {}).get("canClaim"):
+                                    await jitter(0.8, 1.5)
+                                    await safe_post(f"https://vyro.run.place/api/tasks/{tid}/claim", json_data={"idempotencyKey": str(uuid.uuid4())}, req_headers=t_headers)
+
+                # 4. Referral claims
+                await jitter(0.6, 1.4)
+                await safe_post("https://vyro.run.place/api/referrals/claim", json_data={"kind": "DIRECT", "idempotencyKey": str(uuid.uuid4())}, req_headers=vy_h)
+                await safe_post("https://vyro.run.place/api/referrals/claim", json_data={"kind": "MINING", "idempotencyKey": str(uuid.uuid4())}, req_headers=vy_h)
+
+                if wallet_required:
+                    status["bots"]["vyro"] = f"wallet_required (TonConnect needed, lvl: {lvl})"
+                else:
+                    bal_str = f" (lvl: {lvl}, speed: {m_obj.get('currentSpeed', 0)})" if m_obj else " (ok)"
+                    status["bots"]["vyro"] = f"farmed{bal_str}"
+                return
+            except Exception as e:
+                status["bots"]["vyro"] = f"api_error: {format_error(e)}"
+                return
+
+        status["bots"]["vyro"] = "skipped (no initData)"
+
+    # Humanized Concurrent Execution Pipeline: 4 bots per account session (9 Active Legitimate Bots)
+    bot_routines = [
+        {"name": "stones", "fn": _farm_stones, "has_data": bool(tokens.get("stones_init_data"))},
+        {"name": "mrg", "fn": _farm_mrg, "has_data": bool(tokens.get("mrg_init_data"))},
+        {"name": "ailab", "fn": _farm_ailab, "has_data": bool(tokens.get("ailab_init_data"))},
+        {"name": "ultrawallet", "fn": _farm_ultra, "has_data": bool(tokens.get("ultrawallet_init_data"))},
+        {"name": "atf", "fn": _farm_atf, "has_data": bool(tokens.get("atf_init_data"))},
+        {"name": "finvora", "fn": _farm_finvora, "has_data": bool(tokens.get("finvora_init_data"))},
+        {"name": "victors", "fn": _farm_victors, "has_data": bool(tokens.get("victors_init_data"))},
+        {"name": "vyro", "fn": _farm_vyro, "has_data": bool(tokens.get("vyro_init_data"))},
+    ]
+
+    for b in bot_routines:
+        if not b["has_data"]:
+            status["bots"][b["name"]] = "skipped (no initData)"
+
+    active_routines = [b for b in bot_routines if b["has_data"]]
+    random.shuffle(active_routines)
+
+    sem_bot = asyncio.Semaphore(4)
+
+    async def _run_single_routine(b):
+        async with sem_bot:
+            try:
+                await jitter(0.2, 0.6)
+                await asyncio.wait_for(b["fn"](), timeout=45.0)
+            except asyncio.TimeoutError:
+                status["bots"][b["name"]] = "timeout (45s)"
+            except Exception as err:
+                status["bots"][b["name"]] = f"error: {format_error(err)}"
+
+    await asyncio.gather(*[_run_single_routine(b) for b in active_routines], return_exceptions=True)
+    return status
+
+
+async def run_cloud_fleet_farming_cycle(session: aiohttp.ClientSession = None, accounts: list = None, tokens_map: dict = None) -> dict:
+    """Executes full autonomous cloud farming and task completions across all 7 legitimate bots for all fleet accounts."""
+    created_session = False
+    if session is None:
+        session = aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+        created_session = True
+
+    try:
+        if accounts is None:
+            accounts = await fetch_accounts_from_cloud()
+        if not accounts:
+            return {"ok": False, "message": "No accounts found for farming cycle", "farmed_count": 0}
+
+        if tokens_map is None:
+            tokens_map = await fetch_cloud_miniapp_tokens(session)
+
+        farm_tasks = []
+        farm_sem = asyncio.Semaphore(4)
+
+        async def _farm_with_sem(a_dict, t_dict):
+            async with farm_sem:
+                uid_str = str(a_dict.get("user_id"))
+                has_any_token = any(k.endswith("_init_data") and bool(v) for k, v in t_dict.items())
+                all_expired = is_token_data_expired(t_dict, max_age_hours=22.0)
+                if (not has_any_token or all_expired) and (a_dict.get("session_string") or a_dict.get("session")):
+                    try:
+                        fresh_toks = await asyncio.wait_for(extract_tokens_for_account(a_dict), timeout=45.0)
+                        if fresh_toks:
+                            t_dict.update(fresh_toks)
+                            tokens_map[uid_str] = t_dict
+                            asyncio.create_task(sync_account_tokens_to_clouds(t_dict))
+                    except Exception as ex_e:
+                        logger.warning(f"[Farm Task] On-the-fly extraction note for {uid_str}: {ex_e}")
+                try:
+                    return await asyncio.wait_for(farm_single_account_bots(session, a_dict, t_dict), timeout=75.0)
+                except asyncio.TimeoutError:
+                    return {"uid": uid_str, "name": a_dict.get("name", uid_str), "bots": {"status": "timeout_75s"}}
+
+        for acc in accounts:
+            uid = str(acc.get("user_id"))
+            acc_tok = tokens_map.get(uid, {})
+            farm_tasks.append(_farm_with_sem(acc, acc_tok))
+
+        results = await asyncio.gather(*farm_tasks, return_exceptions=True)
+        valid_res = [r for r in results if isinstance(r, dict)]
+
+        return {
+            "ok": True,
+            "farmed_count": len(valid_res),
+            "total_accounts": len(accounts),
+            "results": valid_res,
+            "timestamp": time.time()
+        }
+    finally:
+        if created_session:
+            await session.close()
+
+
+LAST_FARM_RUN = {
+    "status": "idle",
+    "farmed_count": 0,
+    "timestamp": 0,
+    "results": []
+}
+
+
+@app.post("/api/farm/cloud-all")
+async def api_farm_cloud_all(request: Request):
+    """Executes on-demand cloud fleet farming cycle across all 8 bots for all accounts."""
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        pass
+
+    sync_mode = request.query_params.get("sync") == "1"
+
+    async def _execute_farming():
+        global LAST_FARM_RUN
+        LAST_FARM_RUN["status"] = "running"
+        LAST_FARM_RUN["timestamp"] = time.time()
+        try:
+            async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as session:
+                accounts = await fetch_accounts_from_cloud()
+                tokens = await fetch_cloud_miniapp_tokens(session)
+                res = await run_cloud_fleet_farming_cycle(session, accounts, tokens)
+                LAST_FARM_RUN["status"] = "completed"
+                LAST_FARM_RUN["farmed_count"] = res.get("farmed_count", 0)
+                LAST_FARM_RUN["total_accounts"] = res.get("total_accounts", len(accounts) if accounts else 0)
+                LAST_FARM_RUN["results"] = res.get("results", [])
+                LAST_FARM_RUN["timestamp"] = time.time()
+                return res
+        except Exception as e:
+            logger.error(f"[Farm Trigger] Error: {e}")
+            LAST_FARM_RUN["status"] = f"error: {e}"
+            return {"ok": False, "error": str(e)}
+
+    if sync_mode:
+        return await _execute_farming()
+
+    asyncio.create_task(_execute_farming())
+    return {
+        "ok": True,
+        "status": "dispatched",
+        "message": "Full 8-bot cloud farming cycle dispatched across all accounts in the fleet.",
+        "timestamp": time.time()
+    }
+
+
+@app.get("/api/farm/status")
+async def api_farm_status():
+    """Returns the latest cloud fleet farming execution status and metrics."""
+    return {"ok": True, "last_farm_run": LAST_FARM_RUN, "timestamp": time.time()}
+
+
+@app.post("/api/farm/account/{uid}")
+async def api_farm_single_account(uid: str, request: Request):
+    """Executes on-demand cloud farming & token bootstrap for a single account in the fleet."""
+    try:
+        accounts = await fetch_accounts_from_cloud()
+        target_acc = next((a for a in accounts if str(a.get("user_id")) == str(uid)), None)
+        if not target_acc:
+            raise HTTPException(status_code=404, detail=f"Account {uid} not found in fleet")
+
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as session:
+            tokens_map = await fetch_cloud_miniapp_tokens(session)
+            acc_tok = tokens_map.get(str(uid), {})
+            if not acc_tok or not any(k.endswith("_init_data") for k in acc_tok.keys()):
+                fresh = await extract_tokens_for_account(target_acc)
+                if fresh:
+                    acc_tok = fresh
+                    await sync_account_tokens_to_clouds(fresh)
+                    await bootstrap_account_mining(target_acc, fresh)
+
+            if not acc_tok:
+                return {"ok": False, "message": "Failed to extract WebApp tokens for account", "uid": uid}
+
+            res = await farm_single_account_bots(session, target_acc, acc_tok)
+            return {"ok": True, "result": res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Farm Single Account] Error for {uid}: {traceback.format_exc()}")
+        return {"ok": False, "error": str(e), "traceback": traceback.format_exc(), "uid": uid}
+
+
+@app.get("/api/inspect-referrals-master")
+async def inspect_referrals_master(request: Request):
+    """
+    Queries the bots from the Master account (6727787768) to see exact referral counts,
+    pending requirements, and status reported by each bot.
+    """
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    accounts = await fetch_accounts_from_cloud()
+    master_acc = next((a for a in accounts if str(a.get("user_id")) == "6727787768"), None)
+    if not master_acc:
+        raise HTTPException(status_code=404, detail="Master account not found")
+
+    sess_str = master_acc.get("session_string") or master_acc.get("session")
+    cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+    bots_to_query = [
+        ("finvora", "FINVORAWeb3bot", ["/referral", "/start", "/balance"])
+    ]
+    results = {}
+    try:
+        await cl.connect()
+        if not await cl.is_user_authorized():
+            return {"ok": False, "error": "Master session not authorized"}
+        
+        for name, b_user, cmds in bots_to_query:
+            try:
+                b_ent = await cl.get_entity(b_user)
+                sent_cmd = cmds[0]
+                await cl.send_message(b_ent, sent_cmd)
+                await asyncio.sleep(2.0)
+                msgs = await cl.get_messages(b_ent, limit=3)
+                replies = []
+                for m in msgs:
+                    if not m.out:
+                        btns = []
+                        if m.buttons:
+                            for row in m.buttons:
+                                btns.append([b.text for b in row])
+                        replies.append({"text": m.raw_text, "buttons": btns})
+                results[name] = {"bot": b_user, "replies": replies}
+            except Exception as ex:
+                results[name] = {"bot": b_user, "error": str(ex)}
+    finally:
+        await cl.disconnect()
+
+    return {"ok": True, "master_id": "6727787768", "bots": results}
+
+
+async def study_bot_deep(cl: TelegramClient, bot_key: str, bot_username: str) -> dict:
+    """
+    Performs deep inspection of a single Telegram bot using the connected client:
+    - Pre-joins any required sponsor channels.
+    - Inspects initial messages.
+    - Sends /start and handles verification buttons.
+    - Reads reply keyboards and inline buttons.
+    - Tests clicking candidate buttons (Balance, Claim, Bonus, Reward).
+    - Obtains WebApp URL and tgWebAppData via RequestAppWebViewRequest.
+    - Scans frontend HTML & JS bundles for REST API endpoints and tests them.
+    """
+    res = {
+        "bot_key": bot_key,
+        "bot_username": bot_username,
+        "status": "success",
+        "initial_messages": [],
+        "post_start_messages": [],
+        "reply_keyboard": [],
+        "inline_buttons": [],
+        "tested_actions": [],
+        "webapp": {},
+        "error": None
+    }
+    channel_deps = {
+        "finvora": ["finvoraweb3"],
+        "victors": ["VictorsCompany"],
+        "vyro": ["vyrodrop"]
+    }
+
+    try:
+        if bot_key in channel_deps:
+            for ch in channel_deps[bot_key]:
+                try:
+                    await join_tg_target(cl, ch, f"Master {bot_key}")
+                except Exception as je:
+                    logger.debug(f"[Master] Error pre-joining {ch}: {je}")
+
+        bot_ent = await cl.get_entity(bot_username)
+        res["bot_id"] = getattr(bot_ent, "id", None)
+        res["bot_title"] = getattr(bot_ent, "title", None) or getattr(bot_ent, "first_name", "")
+
+        msgs = await cl.get_messages(bot_ent, limit=5)
+        for m in reversed(msgs):
+            res["initial_messages"].append({
+                "id": m.id,
+                "out": m.out,
+                "text": m.raw_text,
+                "buttons": [[b.text for b in row] for row in m.buttons] if m.buttons else []
+            })
+
+        await cl.send_message(bot_ent, "/start")
+        await asyncio.sleep(2.5)
+
+        fresh_msgs = await cl.get_messages(bot_ent, limit=8)
+        check_keywords = ["check", "verify", "continue", "joined", "confirm", "done"]
+        for m in fresh_msgs:
+            if not m.out and m.buttons:
+                clicked_check = False
+                for r_idx, row in enumerate(m.buttons):
+                    for c_idx, b in enumerate(row):
+                        if any(k in b.text.lower() for k in check_keywords):
+                            try:
+                                await m.click(r_idx, c_idx)
+                                clicked_check = True
+                                await asyncio.sleep(2.0)
+                                break
+                            except Exception:
+                                pass
+                    if clicked_check:
+                        break
+                if clicked_check:
+                    break
+
+        fresh_msgs = await cl.get_messages(bot_ent, limit=8)
+        inline_buttons_found = []
+        reply_keyboard_found = []
+
+        for m in reversed(fresh_msgs):
+            m_btns = []
+            if m.buttons:
+                for r_idx, row in enumerate(m.buttons):
+                    row_btns = []
+                    for c_idx, b in enumerate(row):
+                        b_url = getattr(b, "url", None)
+                        if not b_url and hasattr(b, "button") and hasattr(b.button, "type") and hasattr(b.button.type, "url"):
+                            b_url = b.button.type.url
+                        b_info = {
+                            "msg_id": m.id,
+                            "row": r_idx,
+                            "col": c_idx,
+                            "text": b.text,
+                            "url": b_url
+                        }
+                        if hasattr(b, "data") and b.data:
+                            b_info["data"] = b.data.decode("utf-8", errors="ignore")
+                        row_btns.append(b_info)
+                        inline_buttons_found.append(b_info)
+                    m_btns.append(row_btns)
+
+            res["post_start_messages"].append({
+                "id": m.id,
+                "out": m.out,
+                "text": m.raw_text,
+                "buttons": m_btns
+            })
+
+            if m.reply_markup and hasattr(m.reply_markup, "rows"):
+                for r in m.reply_markup.rows:
+                    r_texts = [getattr(b, "text", str(b)) for b in getattr(r, "buttons", []) if hasattr(b, "text")]
+                    if r_texts:
+                        reply_keyboard_found.append(r_texts)
+
+        res["reply_keyboard"] = reply_keyboard_found
+        res["inline_buttons"] = inline_buttons_found
+
+        action_keywords = ["balance", "claim", "bonus", "reward", "miner", "hire", "mining", "referral", "stats", "free", "daily"]
+        tested_actions = []
+
+        flat_reply_btns = [b for row in reply_keyboard_found for b in row]
+        for btn_text in flat_reply_btns:
+            if any(k in btn_text.lower() for k in action_keywords):
+                try:
+                    await cl.send_message(bot_ent, btn_text)
+                    await asyncio.sleep(2.0)
+                    new_msgs = await cl.get_messages(bot_ent, limit=2)
+                    resp_text = new_msgs[0].raw_text if new_msgs and not new_msgs[0].out else "no reply"
+                    tested_actions.append({
+                        "type": "reply_keyboard_send",
+                        "button": btn_text,
+                        "response": resp_text
+                    })
+                except Exception as e:
+                    tested_actions.append({
+                        "type": "reply_keyboard_send",
+                        "button": btn_text,
+                        "error": str(e)
+                    })
+
+        for btn in inline_buttons_found:
+            b_text = btn.get("text", "")
+            if any(k in b_text.lower() for k in ["claim", "bonus", "reward", "free miner", "balance", "start mining"]):
+                try:
+                    m_target = next((m for m in fresh_msgs if m.id == btn.get("msg_id")), None)
+                    if m_target:
+                        click_res = await m_target.click(btn["row"], btn["col"])
+                        await asyncio.sleep(2.0)
+                        after_msgs = await cl.get_messages(bot_ent, limit=2)
+                        after_text = after_msgs[0].raw_text if after_msgs and not after_msgs[0].out else ""
+                        tested_actions.append({
+                            "type": "inline_click",
+                            "button": b_text,
+                            "click_result": str(click_res) if click_res else "ok",
+                            "response": after_text
+                        })
+                except Exception as ce:
+                    tested_actions.append({
+                        "type": "inline_click",
+                        "button": b_text,
+                        "error": str(ce)
+                    })
+
+        res["tested_actions"] = tested_actions
+
+        webapp_info = {"has_webapp": False}
+        candidate_short_names = ["app", "myapp", "Trade", "trade", "bot", "game", "miniapp"]
+        found_webview_url = None
+
+        for btn in inline_buttons_found:
+            url = btn.get("url") or ""
+            if "tgWebApp" in url or ("t.me" in url and "app" in url):
+                found_webview_url = url
+                break
+
+        if not found_webview_url:
+            for m in fresh_msgs:
+                if not m.out and m.buttons:
+                    for r_idx, row in enumerate(m.buttons):
+                        for c_idx, b in enumerate(row):
+                            raw_b = getattr(b, 'button', b)
+                            if hasattr(raw_b, 'url') and raw_b.url:
+                                if "tgWebApp" in raw_b.url or ("t.me" in raw_b.url and "app" in raw_b.url):
+                                    found_webview_url = raw_b.url
+                                    break
+                            if hasattr(raw_b, 'web_app') and getattr(raw_b.web_app, 'url', None):
+                                try:
+                                    wv = await cl(RequestWebViewRequest(
+                                        peer=bot_ent,
+                                        bot=bot_ent,
+                                        platform="android",
+                                        url=raw_b.web_app.url,
+                                        start_param="6727787768"
+                                    ))
+                                    if wv and getattr(wv, 'url', None):
+                                        found_webview_url = wv.url
+                                        break
+                                except Exception:
+                                    pass
+                            if any(w in b.text.lower() for w in ["open", "app", "mini app", "launch", "play"]):
+                                try:
+                                    c_ans = await m.click(r_idx, c_idx)
+                                    if hasattr(c_ans, 'url') and c_ans.url:
+                                        found_webview_url = c_ans.url
+                                        break
+                                    elif isinstance(c_ans, str) and c_ans.startswith("http"):
+                                        found_webview_url = c_ans
+                                        break
+                                except Exception:
+                                    pass
+                        if found_webview_url:
+                            break
+                if found_webview_url:
+                    break
+
+        b_input = await cl.get_input_entity(bot_ent)
+        for sn in candidate_short_names:
+            if found_webview_url and "tgWebAppData" in found_webview_url:
+                break
+            try:
+                wv_res = await cl(RequestAppWebViewRequest(
+                    peer=b_input,
+                    app=InputBotAppShortName(bot_id=b_input, short_name=sn),
+                    platform="android",
+                    start_param="6727787768"
+                ))
+                if wv_res and getattr(wv_res, 'url', None):
+                    found_webview_url = wv_res.url
+                    webapp_info["short_name"] = sn
+                    break
+            except Exception:
+                continue
+
+        if found_webview_url:
+            webapp_info["has_webapp"] = True
+            webapp_info["url"] = found_webview_url
+            parsed_u = urllib.parse.urlparse(found_webview_url)
+            frag_params = urllib.parse.parse_qs(parsed_u.fragment)
+            query_params = urllib.parse.parse_qs(parsed_u.query)
+            init_data = frag_params.get("tgWebAppData", [None])[0] or query_params.get("tgWebAppData", [None])[0]
+            webapp_info["init_data_present"] = bool(init_data)
+            if init_data:
+                webapp_info["init_data_sample"] = init_data[:80] + "..."
+
+            base_url = f"{parsed_u.scheme}://{parsed_u.netloc}"
+            webapp_info["base_url"] = base_url
+
+            async with aiohttp.ClientSession() as http:
+                web_headers = {
+                    "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.127 Mobile Safari/537.36 Telegram-Android/11.1.3",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Referer": "https://web.telegram.org/"
+                }
+                try:
+                    async with http.get(found_webview_url, headers=web_headers, timeout=aiohttp.ClientTimeout(total=8)) as html_resp:
+                        html_content = await html_resp.text()
+                        webapp_info["html_status"] = html_resp.status
+
+                        script_srcs = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', html_content)
+                        webapp_info["script_srcs"] = script_srcs[:5]
+
+                        discovered_routes = set()
+                        for s_src in script_srcs[:3]:
+                            js_url = s_src if s_src.startswith("http") else urllib.parse.urljoin(found_webview_url, s_src)
+                            try:
+                                async with http.get(js_url, headers=web_headers, timeout=aiohttp.ClientTimeout(total=8)) as js_resp:
+                                    if js_resp.status == 200:
+                                        js_code = await js_resp.text()
+                                        routes = re.findall(r'["\'](/api/[a-zA-Z0-9_\-\/]+)["\']', js_code)
+                                        for r in routes:
+                                            if any(k in r.lower() for k in ["claim", "mine", "mining", "bonus", "checkin", "daily", "task", "user", "profile", "info", "balance", "start", "reward", "wallet", "boost"]):
+                                                discovered_routes.add(r)
+                            except Exception:
+                                pass
+                        webapp_info["discovered_api_routes"] = list(discovered_routes)
+
+                        api_test_results = {}
+                        if init_data and discovered_routes:
+                            for candidate_r in list(discovered_routes)[:3]:
+                                full_api_url = urllib.parse.urljoin(base_url, candidate_r)
+                                api_headers = {
+                                    **web_headers,
+                                    "Origin": base_url,
+                                    "Referer": found_webview_url,
+                                    "Authorization": f"tma {init_data}",
+                                    "Content-Type": "application/json"
+                                }
+                                try:
+                                    async with http.post(full_api_url, json={"initData": init_data}, headers=api_headers, timeout=aiohttp.ClientTimeout(total=5)) as post_r:
+                                        post_text = await post_r.text()
+                                        api_test_results[f"POST {candidate_r}"] = {"status": post_r.status, "resp": post_text[:200]}
+                                except Exception as pe:
+                                    api_test_results[f"POST {candidate_r}"] = {"error": str(pe)}
+                        webapp_info["api_test_results"] = api_test_results
+                except Exception as he:
+                    webapp_info["html_fetch_error"] = str(he)
+
+        res["webapp"] = webapp_info
+
+    except Exception as e:
+        res["status"] = "error"
+        res["error"] = str(e)
+
+    return res
+
+
+@app.get("/api/study-bot/{bot_key}")
+@app.post("/api/study-bot/{bot_key}")
+async def study_bot_endpoint(bot_key: str, request: Request):
+    """
+    Studies one or all bots in depth using specified account (?uid=) or active authorized worker account.
+    bot_key can be: stones, mrg, ailab, ultrawallet, atf, finvora, victors, vyro, or all.
+    """
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    accounts = await fetch_accounts_from_cloud()
+    req_uid = request.query_params.get("uid")
+    target_acc = None
+    if req_uid:
+        target_acc = next((a for a in accounts if str(a.get("user_id")) == str(req_uid)), None)
+
+    bot_map = {
+        "stones": "stoneswithestand_bot",
+        "mrg": "mrgminerbot",
+        "ailab": "AiLab_robot",
+        "ultrawallet": "UltrawalletTrade_Bot",
+        "atf": "ATF_AIRDROP_bot",
+        "finvora": "FINVORAWeb3bot",
+        "victors": "VictorsCompanybot",
+        "vyro": "vyrodrop_bot"
+    }
+
+    target_bots = list(bot_map.items()) if bot_key == "all" else [(bot_key, bot_map[bot_key])] if bot_key in bot_map else None
+    if not target_bots:
+        raise HTTPException(status_code=400, detail=f"Unknown bot_key: {bot_key}. Available: {list(bot_map.keys())} or 'all'")
+
+    # Try target account first, then fallback to any active worker account
+    ordered_accs = ([target_acc] if target_acc else []) + [a for a in accounts if a != target_acc and (a.get("session_string") or a.get("session"))]
+    results = {}
+    used_uid = None
+    for acc in ordered_accs:
+        sess_str = acc.get("session_string") or acc.get("session")
+        if not sess_str:
+            continue
+        cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+        try:
+            await asyncio.wait_for(cl.connect(), timeout=8.0)
+            if not await cl.is_user_authorized():
+                await cl.disconnect()
+                continue
+            used_uid = str(acc.get("user_id"))
+            for b_key, b_user in target_bots:
+                results[b_key] = await study_bot_deep(cl, b_key, b_user)
+            break
+        except Exception as e:
+            logger.warning(f"Study bot attempt with UID {acc.get('user_id')} note: {e}")
+        finally:
+            try: await cl.disconnect()
+            except Exception: pass
+
+    if not used_uid:
+        return {"ok": False, "error": "No authorized account session available for deep study"}
+
+    return {"ok": True, "inspected_by_uid": used_uid, "results": results}
+
+
+@app.post("/api/mute-all-chats")
+@app.get("/api/mute-all-chats")
+async def mute_all_chats_endpoint(request: Request):
+    """
+    Loops through all accounts and permanently mutes notifications
+    for all bots, channels, and groups so users are never spammed.
+    """
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    accounts = await fetch_accounts_from_cloud()
+    all_targets_to_mute = [
+        "stoneswithestand_bot", "stoneswithestand",
+        "mrgminerbot", "mrgminer", "mrgfun",
+        "AiLab_robot", "ailabrobotnews",
+        "UltrawalletTrade_Bot", "ultrawalletofficial",
+        "ATF_AIRDROP_bot",
+        "FINVORAWeb3bot", "finvoraweb3",
+        "VictorsCompanybot", "VictorsCompany",
+        "vyrodrop_bot", "vyrodrop"
+    ]
+    results = []
+    for acc in accounts:
+        uid = str(acc.get("user_id"))
+        name = acc.get("name", uid)
+        sess_str = acc.get("session_string") or acc.get("session")
+        if not sess_str:
+            continue
+        cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+        muted_count = 0
+        try:
+            await cl.connect()
+            if not await cl.is_user_authorized():
+                results.append({"uid": uid, "name": name, "error": "unauthorized"})
+                continue
+
+            for tgt in all_targets_to_mute:
+                try:
+                    await mute_peer(cl, tgt, name)
+                    muted_count += 1
+                except Exception:
+                    pass
+
+            # Also mute all dialogs that are channels or bots
+            dialogs = await cl.get_dialogs(limit=50)
+            for d in dialogs:
+                if d.is_channel or d.is_group or getattr(d.entity, 'bot', False):
+                    try:
+                        await mute_peer(cl, d.input_entity, name)
+                        muted_count += 1
+                    except Exception:
+                        pass
+
+            results.append({"uid": uid, "name": name, "muted_chats": muted_count})
+        except Exception as e:
+            results.append({"uid": uid, "name": name, "error": str(e)})
+        finally:
+            try:
+                await cl.disconnect()
+            except Exception:
+                pass
+
+    return {"ok": True, "results": results}
+
+
+@app.get("/api/inspect-bot-chat/{uid}")
+async def inspect_bot_chat(uid: str, request: Request):
+    """Fetches the latest messages and buttons from each bot for a specific worker account."""
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    accounts = await fetch_accounts_from_cloud()
+    target_acc = next((a for a in accounts if str(a.get("user_id")) == str(uid)), None)
+    if not target_acc:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    sess_str = target_acc.get("session_string") or target_acc.get("session")
+    cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+    bots_to_check = [
+        ("stones", "stoneswithestand_bot"),
+        ("mrg", "mrgminerbot"),
+        ("ailab", "AiLab_robot"),
+        ("ultrawallet", "UltrawalletTrade_Bot"),
+        ("atf", "ATF_AIRDROP_bot"),
+        ("finvora", "FINVORAWeb3bot"),
+        ("victors", "VictorsCompanybot"),
+        ("vyro", "vyrodrop_bot")
+    ]
+    chats = {}
+    try:
+        await cl.connect()
+        if not await cl.is_user_authorized():
+            return {"ok": False, "error": "Account session not authorized"}
+
+        for name, b_user in bots_to_check:
+            try:
+                b_ent = await cl.get_entity(b_user)
+                msgs = await cl.get_messages(b_ent, limit=4)
+                msg_list = []
+                for m in reversed(msgs):
+                    btns = []
+                    if m.buttons:
+                        for row in m.buttons:
+                            row_btns = []
+                            for b in row:
+                                raw_b = getattr(b, "button", b)
+                                b_type = type(raw_b).__name__
+                                b_url = getattr(b, "url", None) or getattr(raw_b, "url", None) or getattr(getattr(raw_b, "web_app", None), "url", None)
+                                b_data = getattr(raw_b, "data", None)
+                                if isinstance(b_data, bytes):
+                                    try: b_data = b_data.decode()
+                                    except Exception: b_data = str(b_data)
+                                row_btns.append({
+                                    "text": b.text,
+                                    "type": b_type,
+                                    "url": b_url,
+                                    "data": b_data
+                                })
+                            btns.append(row_btns)
+                    msg_list.append({"id": m.id, "out": m.out, "text": m.raw_text, "buttons": btns})
+                chats[name] = msg_list
+            except Exception as ex:
+                chats[name] = [{"error": str(ex)}]
+    finally:
+        await cl.disconnect()
+
+    return {"ok": True, "uid": uid, "chats": chats}
+
+
+# Type B Channel & Subscription Engine Definitions
+CHANNEL_WHITELIST = {
+    "myagyai",
+    "stoneswithestand",
+    "mrgminer",
+    "mrgfun",
+    "mrgwithdrawal",
+    "DurovKidney",
+    "ailabrobotnews",
+    "ultrawallet",
+    "ultrawalletofficial",
+    "gramworkers",
+    "finvoraweb3",
+    "VictorsCompany",
+    "vyrodrop",
+    "atfminers"
+}
+
+# Active Legitimate Sponsor Channels (Scammers, TRX Power & ART purged)
+MANDATORY_SPONSOR_CHANNELS = [
+    "finvoraweb3",
+    "stoneswithestand",
+    "mrgminer", "mrgfun", "mrgwithdrawal", "DurovKidney",
+    "ailabrobotnews",
+    "ultrawalletofficial",
+    "VictorsCompany",
+    "vyrodrop",
+    "atfminers"
+]
+
+# 7 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
+FLEET_LEGITIMATE_BOTS = [
+    "stoneswithestand_bot", "mrgminerbot", "AiLab_robot",
+    "UltrawalletTrade_Bot", "ATF_AIRDROP_bot",
+    "FINVORAWeb3bot", "VictorsCompanybot", "vyrodrop_bot"
+]
+
+# Blacklisted & Purged Bots to permanently block and delete from Telegram dialogs
+FLEET_BANNED_SCAMMERS = [
+    # Newly purged per user directive
+    "TurboGramV1_bot",
+    "trxpowermining_bot",
+    "BitcoinCloudMinersBot",
+    "Bitcoin_Cloud_Mining_bot",
+    "ART_AIRDROP_BOT",
+    "artairdrop_bot",
+    # Previously blacklisted scammers
+    "ainovum_bot",
+    "tensormining_bot",
+    "TensorMiningRobot",
+    "TonTraderAIBot",
+    "tontrader_bot",
+    "tacairdrop_bot",
+    "usdtquadbot",
+    "ApxMinerBot",
+    "apexminer_bot",
+    "OminixAiBot"
+]
+
+# Channels & Groups to permanently leave and delete from Telegram dialogs
+SCAM_CHANNELS_TO_LEAVE = [
+    # Newly purged per user directive
+    "TurboGramAnnouncements",
+    "TurboGramPayment",
+    "trxpowerminingofficial",
+    "trx_world_work",
+    "trxpowermining",
+    "art_airdrop",
+    "artairdrop",
+    # Previously blacklisted scam channels
+    "tensorcoinnews",
+    "tontraderai_official",
+    "tontraderai_group",
+    "tontraderai_reviews",
+    "tacairdrop",
+    "tacairdrop_official",
+    "tac_airdrop",
+    "tacairdropen",
+    "novum_en",
+    "apexminer_official",
+    "apexminergroup",
+    "usdtquad_channel",
+    "usdtquad"
+]
+
+LAST_CHANNEL_SYNC_STATUS = {
+    "status": "idle",
+    "timestamp": 0,
+    "total_accounts": 0,
+    "results": []
+}
+
+@app.get("/api/channels/status")
+async def channel_status_endpoint(request: Request):
+    """Returns the latest Type B Channel & Subscription Engine status."""
+    return {"ok": True, "status": LAST_CHANNEL_SYNC_STATUS}
+
+
+@app.post("/api/channels/sync-and-verify")
+@app.get("/api/channels/sync-and-verify")
+async def sync_and_verify_channels_endpoint(request: Request):
+    """
+    Type B Channel & Bot Management Engine:
+    Ensures all fleet accounts join mandatory sponsor channels, unblock all 7 legitimate bots,
+    and permanently mute all channels/bots to prevent notification spam.
+    Protects against Telegram's 500-channel limit by leaving unwhitelisted spam channels if dialogs > 400.
+    """
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    accounts = await fetch_accounts_from_cloud()
+    target_uid = request.query_params.get("uid")
+    if target_uid:
+        accounts = [a for a in accounts if str(a.get("user_id")) == str(target_uid)]
+
+    sync_mode = request.query_params.get("sync") == "1" or bool(target_uid)
+
+    async def _run_channel_sync():
+        LAST_CHANNEL_SYNC_STATUS["status"] = "running"
+        LAST_CHANNEL_SYNC_STATUS["timestamp"] = time.time()
+        LAST_CHANNEL_SYNC_STATUS["total_accounts"] = len(accounts)
+        LAST_CHANNEL_SYNC_STATUS["results"] = []
+        results = []
+
+        for acc in accounts:
+            uid = str(acc.get("user_id"))
+            name = acc.get("name", uid)
+            sess_str = acc.get("session_string") or acc.get("session")
+            if not sess_str:
+                res_item = {"uid": uid, "name": name, "status": "no_session"}
+                results.append(res_item)
+                LAST_CHANNEL_SYNC_STATUS["results"].append(res_item)
+                continue
+
+            cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+            acc_res = {"uid": uid, "name": name, "joined": [], "unblocked": [], "blocked_scammers": [], "deleted_dialogs": [], "left_scam_channels": [], "muted": 0, "pruned": 0}
+            try:
+                await asyncio.wait_for(cl.connect(), timeout=10.0)
+                if not await cl.is_user_authorized():
+                    acc_res["status"] = "unauthorized"
+                    results.append(acc_res)
+                    LAST_CHANNEL_SYNC_STATUS["results"].append(acc_res)
+                    continue
+
+                # 1. Permanently Block and DELETE chat history for all blacklisted bots
+                for sb in FLEET_BANNED_SCAMMERS:
+                    try:
+                        b_ent = await cl.get_entity(sb)
+                        await cl(functions.contacts.BlockRequest(id=b_ent))
+                        await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
+                        await cl.delete_dialog(b_ent)
+                        acc_res["blocked_scammers"].append(sb)
+                        acc_res["deleted_dialogs"].append(sb)
+                    except Exception:
+                        pass
+
+                # 2. Leave and DELETE dialogs for all scammer channels
+                for sc in SCAM_CHANNELS_TO_LEAVE:
+                    try:
+                        ch_ent = await cl.get_entity(sc)
+                        await cl(functions.channels.LeaveChannelRequest(ch_ent))
+                        await cl.delete_dialog(ch_ent)
+                        acc_res["left_scam_channels"].append(sc)
+                    except Exception:
+                        pass
+
+                # 3. Unblock all 7 legitimate fleet bots
+                for b in FLEET_LEGITIMATE_BOTS:
+                    try:
+                        await cl(functions.contacts.UnblockRequest(id=b))
+                        acc_res["unblocked"].append(b)
+                    except Exception:
+                        pass
+
+                # 4. Join all mandatory legitimate sponsor channels
+                for ch in MANDATORY_SPONSOR_CHANNELS:
+                    try:
+                        await cl(JoinChannelRequest(ch))
+                        acc_res["joined"].append(ch)
+                        await asyncio.sleep(0.5)
+                    except Exception as ce:
+                        err_s = str(ce).lower()
+                        if "already" in err_s:
+                            acc_res["joined"].append(f"{ch} (already)")
+
+                # 5. Scan ALL dialogs: Erase and delete dialogs for any scammer bot, channel, or group
+                muted_cnt = 0
+                dialogs = await cl.get_dialogs(limit=200)
+                for d in dialogs:
+                    uname = (getattr(d.entity, 'username', '') or '').lower()
+                    title = (d.name or '').lower()
+                    is_scam = (
+                        uname in SCAM_CHANNELS_TO_LEAVE or
+                        uname in [b.lower() for b in FLEET_BANNED_SCAMMERS] or
+                        any(s in uname for s in ["tensorcoin", "tontrader", "tacairdrop", "usdtquad", "apexminer", "ainovum", "trxpower", "bitcoincloud", "artairdrop", "art_airdrop"]) or
+                        any(s in title for s in ["tensorcoin", "ton trader", "tac airdrop", "usdt quad", "apex miner", "ainovum", "trx power", "bitcoin cloud", "art airdrop"])
+                    )
+                    if is_scam:
+                        if d.is_channel or d.is_group:
+                            try:
+                                await cl(functions.channels.LeaveChannelRequest(d.input_entity))
+                            except Exception:
+                                pass
+                            try:
+                                await cl.delete_dialog(d.input_entity)
+                                acc_res["left_scam_channels"].append(uname or d.name)
+                            except Exception:
+                                pass
+                        else:
+                            # Bot or user
+                            try:
+                                await cl(functions.contacts.BlockRequest(id=d.input_entity))
+                            except Exception:
+                                pass
+                            try:
+                                await cl(functions.messages.DeleteHistoryRequest(peer=d.input_entity, max_id=0, just_clear=False, revoke=True))
+                            except Exception:
+                                pass
+                            try:
+                                await cl.delete_dialog(d.input_entity)
+                                acc_res["deleted_dialogs"].append(uname or d.name)
+                            except Exception:
+                                pass
+                        await asyncio.sleep(0.3)
+                        continue
+
+                    if d.is_channel or d.is_group or getattr(d.entity, 'bot', False):
+                        try:
+                            await mute_peer(cl, d.input_entity, name)
+                            muted_cnt += 1
+                        except Exception:
+                            pass
+                acc_res["muted"] = muted_cnt
+
+                # 4. Channel limit protection: if total dialogs > 400, leave non-whitelisted channels (workers only)
+                pruned_cnt = 0
+                if uid != "6727787768" and len(dialogs) > 400:
+                    for d in dialogs:
+                        if d.is_channel and not getattr(d.entity, 'megagroup', False):
+                            uname = (getattr(d.entity, 'username', '') or '').lower()
+                            title = (d.name or '').lower()
+                            if uname not in CHANNEL_WHITELIST and not uname.startswith("aaa") and "aaa" not in title and "my agy ai" not in title:
+                                try:
+                                    await cl(functions.channels.LeaveChannelRequest(d.input_entity))
+                                    pruned_cnt += 1
+                                    await asyncio.sleep(0.8)
+                                except Exception:
+                                    pass
+                acc_res["pruned"] = pruned_cnt
+                acc_res["status"] = "synced"
+                results.append(acc_res)
+                LAST_CHANNEL_SYNC_STATUS["results"].append(acc_res)
+            except Exception as e:
+                acc_res["status"] = f"error: {format_error(e)}"
+                results.append(acc_res)
+                LAST_CHANNEL_SYNC_STATUS["results"].append(acc_res)
+            finally:
+                try: await cl.disconnect()
+                except Exception: pass
+
+        LAST_CHANNEL_SYNC_STATUS["status"] = "completed"
+        return results
+
+    if sync_mode:
+        res = await _run_channel_sync()
+        return {"ok": True, "count": len(res), "results": res}
+    else:
+        asyncio.create_task(_run_channel_sync())
+        return {
+            "ok": True,
+            "status": "running_in_background",
+            "accounts_queued": len(accounts),
+            "message": "Type B Channel Sync & Muting running in background across all fleet accounts. Monitor via /api/channels/status"
+        }
+
+
+LAST_ONBOARD_STATUS = {
+    "status": "idle",
+    "processed": 0,
+    "total": 0,
+    "timestamp": 0,
+    "results": []
+}
+
+
+@app.get("/api/onboard-status")
+async def onboard_status_endpoint(request: Request):
+    """Returns the current background onboarding and referral binding execution status."""
+    return {"ok": True, "status": LAST_ONBOARD_STATUS}
+
+
+@app.post("/api/onboard-new-bots")
+@app.get("/api/onboard-new-bots")
+async def onboard_new_bots(request: Request):
+    """
+    Explicit interactive cloud onboarding endpoint:
+    Processes worker accounts, executes bot-specific referral completion pipelines,
+    joins sponsor channels, clicks verification buttons, and starts mining.
+    Supports background execution (default) and single account filtering (?uid=<id>).
+    """
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    target_uid = request.query_params.get("uid") or body.get("uid")
+    sync_mode = request.query_params.get("sync") == "1" or bool(target_uid)
+
+    accounts = body.get("accounts", [])
+    if not accounts:
+        accounts = await fetch_accounts_from_cloud()
+
+    if target_uid:
+        accounts = [a for a in accounts if str(a.get("user_id")) == str(target_uid)]
+        if not accounts:
+            raise HTTPException(status_code=404, detail=f"Account with UID {target_uid} not found")
+
+    async def _run_onboard_pipeline():
+        LAST_ONBOARD_STATUS["status"] = "running"
+        LAST_ONBOARD_STATUS["timestamp"] = time.time()
+        LAST_ONBOARD_STATUS["total"] = len(accounts)
+        LAST_ONBOARD_STATUS["processed"] = 0
+        LAST_ONBOARD_STATUS["results"] = []
+
+        results = []
+        for acc in accounts:
+            uid = str(acc.get("user_id"))
+            name = acc.get("name", "User")
+            if uid == "6727787768":
+                continue
+
+            sess_str = acc.get("session_string") or acc.get("session")
+            if not sess_str:
+                continue
+
+            acc_res = {"uid": uid, "name": name, "bots": {}}
+            cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+            try:
+                await cl.connect()
+                if not await cl.is_user_authorized():
+                    acc_res["error"] = "unauthorized"
+                    results.append(acc_res)
+                    continue
+
+                # Onboard and bind master referrals across the 7 legitimate fleet bots
+                try:
+                    await bind_account_master_referrals(cl, acc)
+                    for b_name in ["stones", "mrg", "ailab", "ultrawallet", "atf", "finvora", "victors", "vyro"]:
+                        acc_res["bots"][b_name] = "verified" if acc.get(f"{b_name}_referral_bound") else "pending"
+                except Exception as e:
+                    acc_res["error"] = str(e)
+
+                if is_account_referrals_bound(acc):
+                    acc["referrals_bound"] = True
+                await sync_new_account_to_clouds(acc)
+            finally:
+                try:
+                    await cl.disconnect()
+                except Exception:
+                    pass
+            results.append(acc_res)
+            LAST_ONBOARD_STATUS["processed"] += 1
+            LAST_ONBOARD_STATUS["results"].append(acc_res)
+
+        LAST_ONBOARD_STATUS["status"] = "completed"
+        return {"ok": True, "count": len(results), "results": results}
+
+    if not sync_mode:
+        asyncio.create_task(_run_onboard_pipeline())
+        return {
+            "ok": True,
+            "status": "running_in_background",
+            "accounts_to_process": len([a for a in accounts if str(a.get("user_id")) != "6727787768"]),
+            "message": "Cloud onboarding and referral binding running in background. Monitor via /api/onboard-status"
+        }
+    else:
+        return await _run_onboard_pipeline()
+
+
+@app.post("/api/withdraw/auto-cycle")
+async def api_withdraw_auto_cycle(request: Request):
+    """Auto-withdrawals permanently disabled by user directive."""
+    return {
+        "ok": True,
+        "disabled": True,
+        "message": "Automated withdrawals are permanently disabled to prevent wrong-address routing. All fleet accounts are in 100% accumulation and compounding mode.",
+        "timestamp": time.time()
+    }
+
+
+async def cloud_wealth_automation_watchdog():
+    """24/7 background watchdog executing scheduled cloud farming in the cloud."""
+    logger.info("[Cloud Wealth Watchdog] Initialized 24/7 autonomous farming scheduler (Auto-withdrawals disabled)...")
+    await asyncio.sleep(60)
+    cycle_count = 0
+    while True:
+        try:
+            cycle_count += 1
+            accounts = await fetch_accounts_from_cloud()
+            if accounts:
+                logger.info(f"[Cloud Wealth Watchdog] ⚡ Running Scheduled Cloud Cycle #{cycle_count} across {len(accounts)} accounts...")
+                async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as session:
+                    tokens = await fetch_cloud_miniapp_tokens(session)
+
+                    # 1. Full Fleet Farming Cycle
+                    try:
+                        farm_res = await run_cloud_fleet_farming_cycle(session, accounts, tokens)
+                        logger.info(f"[Cloud Wealth Watchdog] Fleet farming cycle #{cycle_count} finished: {farm_res.get('farmed_count', 0)} accounts")
+                    except Exception as fe:
+                        logger.error(f"[Cloud Wealth Watchdog] Farming error: {fe}")
+
+                    # 2. Automated Withdrawals & Sweepers Permanently Disabled by User Directive
+                    pass
+
+        except Exception as e:
+            logger.error(f"[Cloud Wealth Watchdog] Cycle error: {e}")
+
+        await asyncio.sleep(1800)
