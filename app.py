@@ -229,12 +229,13 @@ def is_token_data_expired(t_dict: dict, max_age_hours: float = 20.0) -> bool:
             ad = parsed.get("auth_date", [None])[0]
             if ad and ad.isdigit():
                 tok_age = now_ts - float(ad)
-                if tok_age > (max_age_hours * 3600.0):
+                max_bot_age = (1.5 * 3600.0) if kt == "vyro_init_data" else (max_age_hours * 3600.0)
+                if tok_age > max_bot_age:
                     expired_cnt += 1
         except Exception:
             pass
 
-    if expired_cnt > 0 or missing_cnt > 4:
+    if expired_cnt > 0 or missing_cnt > 0:
         return True
     return False
 
@@ -3217,6 +3218,30 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
             await jitter(1.0, 2.2)
             _, log_data = await safe_post(f"{atf_base}?action=login&t={int(time.time()*1000)}", atf_payload(), atf_h)
+            
+            # ATF Cloudflare Turnstile entry captcha check
+            if (not log_data) or (isinstance(log_data, dict) and log_data.get("reason") in ("entry_captcha_required", "captcha_required")):
+                atf_pass = get_cached_upstash_pass(f"atf:pass:{uid}")
+                if atf_pass is None and UPSTASH_URL and UPSTASH_TOKEN:
+                    try:
+                        async with session.get(f"{UPSTASH_URL}/get/atf:pass:{uid}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3)) as ar:
+                            if ar.status == 200:
+                                ad = await ar.json()
+                                if ad.get("result"):
+                                    parsed_a = json.loads(ad["result"]) if isinstance(ad["result"], str) else ad["result"]
+                                    atf_pass = parsed_a.get("captcha_token") or parsed_a.get("token") or parsed_a
+                                    set_cached_upstash_pass(f"atf:pass:{uid}", atf_pass, ttl=86400 * 5)
+                    except Exception:
+                        pass
+                if atf_pass:
+                    await safe_post(f"{atf_base}?action=verify_entry_captcha&t={int(time.time()*1000)}", atf_payload({"captcha_token": atf_pass}), atf_h)
+                    await jitter(0.5, 1.2)
+                    _, log_data = await safe_post(f"{atf_base}?action=login&t={int(time.time()*1000)}", atf_payload(), atf_h)
+
+            if isinstance(log_data, dict) and log_data.get("reason") in ("entry_captcha_required", "captcha_required"):
+                status["bots"]["atf"] = "entry_captcha_required (Turnstile needed)"
+                return
+
             completed_tasks = set()
             task_cooldowns = {}
             if log_data and isinstance(log_data, dict):
@@ -3347,17 +3372,23 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 await jitter(0.6, 1.5)
                 await safe_post("https://server.victors.company/api/checkin", json_data={}, req_headers=v_h)
 
-                # 3. Mining claim
+                # 3. Connect TON wallet if not yet connected
+                v_ton_w = (acc.get("ton_wallet") or {}).get("address")
+                if v_ton_w and not me.get("walletAddress"):
+                    await safe_post("https://server.victors.company/api/wallet/connect", json_data={"address": v_ton_w}, req_headers=v_h)
+                    await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": "connect-wallet"}, req_headers=v_h)
+
+                # 4. Mining claim
                 await jitter(0.8, 1.8)
                 await safe_post("https://server.victors.company/api/mining/claim", json_data={}, req_headers=v_h)
 
-                # 4. Levels unlock
+                # 5. Levels unlock
                 unlocked = me.get("unlockedLevel", lvl)
                 if unlocked > lvl:
                     await jitter(0.5, 1.2)
                     await safe_post("https://server.victors.company/api/levels/unlock", json_data={"level": unlocked}, req_headers=v_h)
 
-                # 5. Tasks discovery & claim
+                # 6. Tasks discovery & claim
                 await jitter(0.8, 1.6)
                 _, t_d = await safe_get("https://server.victors.company/api/tasks", req_headers=v_h)
                 if t_d and isinstance(t_d, dict):
@@ -3366,16 +3397,16 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                         for t in tasks:
                             if isinstance(t, dict):
                                 tid = t.get("taskId") or t.get("id")
-                                if tid and t.get("status") == "open":
+                                if tid and (t.get("status") == "open" or not t.get("claimed")):
                                     await jitter(0.4, 0.9)
                                     await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": tid}, req_headers=v_h)
 
-                # 6. Referral claim bonus & commission
+                # 7. Referral claim bonus & commission
                 await jitter(0.6, 1.4)
                 await safe_post("https://server.victors.company/api/referral/claim-bonus", json_data={}, req_headers=v_h)
                 await safe_post("https://server.victors.company/api/referral/claim-commission", json_data={}, req_headers=v_h)
 
-                # 7. Deep Mine Arcade Minigame Solver
+                # 8. Deep Mine Arcade Minigame Solver
                 try:
                     from victors_arcade_solver import solve_deep_mine_expeditions
                     arc_stats = await solve_deep_mine_expeditions(session, v_h, name, max_runs=2)
@@ -3410,8 +3441,12 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
                 # 1. Bootstrap
                 b_code, b_d = await safe_get("https://vyro.run.place/api/bootstrap", req_headers=vy_h)
-                if not b_d or not isinstance(b_d, dict):
-                    status["bots"]["vyro"] = f"skipped (bootstrap {b_code or 'error'})"
+                if b_code != 200 or not b_d or not isinstance(b_d, dict) or "error" in b_d:
+                    err_code = b_d.get("error", {}).get("code") if isinstance(b_d, dict) else ""
+                    if b_code == 401 or err_code == "TELEGRAM_AUTH_INVALID":
+                        status["bots"]["vyro"] = "token_expired (auth 401 - needs MTProto refresh)"
+                    else:
+                        status["bots"]["vyro"] = f"skipped (bootstrap {b_code or 'error'})"
                     return
 
                 u_obj = b_d.get("user", {})
@@ -3474,8 +3509,8 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 if wallet_required:
                     status["bots"]["vyro"] = f"wallet_required (TonConnect needed, lvl: {lvl})"
                 else:
-                    bal_str = f" (lvl: {lvl}, speed: {m_obj.get('currentSpeed', 0)})" if m_obj else " (ok)"
-                    status["bots"]["vyro"] = f"farmed{bal_str}"
+                    speed = m_obj.get('currentSpeed', 0) if m_obj else 0
+                    status["bots"]["vyro"] = f"farmed (lvl: {lvl}, speed: {speed})"
                 return
             except Exception as e:
                 status["bots"]["vyro"] = f"api_error: {format_error(e)}"
@@ -3483,7 +3518,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
         status["bots"]["vyro"] = "skipped (no initData)"
 
-    # Humanized Concurrent Execution Pipeline: 3 bots per account session (4 Active Legitimate Bots)
+    # Humanized Concurrent Execution Pipeline: 4 Active Legitimate Bots
     bot_routines = [
         {"name": "mrg", "fn": _farm_mrg, "has_data": bool(tokens.get("mrg_init_data"))},
         {"name": "atf", "fn": _farm_atf, "has_data": bool(tokens.get("atf_init_data"))},
@@ -3511,6 +3546,11 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 status["bots"][b["name"]] = f"error: {format_error(err)}"
 
     await asyncio.gather(*[_run_single_routine(b) for b in active_routines], return_exceptions=True)
+    if bg_tasks:
+        try:
+            await asyncio.wait_for(asyncio.gather(*bg_tasks, return_exceptions=True), timeout=18.0)
+        except Exception:
+            pass
     return status
 
 
@@ -3640,12 +3680,14 @@ async def api_farm_single_account(uid: str, request: Request):
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as session:
             tokens_map = await fetch_cloud_miniapp_tokens(session)
             acc_tok = tokens_map.get(str(uid), {})
-            if not acc_tok or not any(k.endswith("_init_data") for k in acc_tok.keys()):
+            key_4_tokens = ["mrg_init_data", "atf_init_data", "victors_init_data", "vyro_init_data"]
+            missing_or_expired = (not acc_tok) or any(k not in acc_tok for k in key_4_tokens) or is_token_data_expired(acc_tok)
+            if missing_or_expired:
                 fresh = await extract_tokens_for_account(target_acc)
                 if fresh:
-                    acc_tok = fresh
-                    await sync_account_tokens_to_clouds(fresh)
-                    await bootstrap_account_mining(target_acc, fresh)
+                    acc_tok = {**acc_tok, **fresh}
+                    await sync_account_tokens_to_clouds(acc_tok)
+                    await bootstrap_account_mining(target_acc, acc_tok)
 
             if not acc_tok:
                 return {"ok": False, "message": "Failed to extract WebApp tokens for account", "uid": uid}
