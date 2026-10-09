@@ -691,9 +691,9 @@ async def fetch_accounts_from_cloud():
                                                         if auid not in accounts_map:
                                                             accounts_map[auid] = acc_obj
                                                         else:
-                                                            for f_k, f_v in acc_obj.items():
-                                                                if f_v is not None and (f_k not in accounts_map[auid] or not accounts_map[auid].get(f_k)):
-                                                                    accounts_map[auid][f_k] = f_v
+                                                            if acc_obj.get("session_string"):
+                                                                accounts_map[auid]["session_string"] = acc_obj["session_string"]
+                                                            accounts_map[auid].update(acc_obj)
                                             except Exception:
                                                 pass
             except Exception as ue:
@@ -4283,8 +4283,27 @@ async def debug_account_session(uid: str, request: Request):
     if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    accounts = await fetch_accounts_from_cloud()
-    target_acc = next((a for a in accounts if str(a.get("user_id")) == str(uid)), None)
+    target_acc = None
+    if UPSTASH_URL and UPSTASH_TOKEN:
+        try:
+            up_h = {"Authorization": f"Bearer {UPSTASH_TOKEN}", "Content-Type": "application/json"}
+            async with aiohttp.ClientSession() as http:
+                async with http.get(f"{UPSTASH_URL}/get/account:{uid}", headers=up_h, timeout=aiohttp.ClientTimeout(total=4)) as ur:
+                    if ur.status == 200:
+                        r_data = await ur.json()
+                        val = r_data.get("result")
+                        if val:
+                            obj = json.loads(val) if isinstance(val, str) else val
+                            while isinstance(obj, str): obj = json.loads(obj)
+                            if isinstance(obj, dict) and obj.get("session_string"):
+                                target_acc = obj
+        except Exception:
+            pass
+
+    if not target_acc:
+        accounts = await fetch_accounts_from_cloud()
+        target_acc = next((a for a in accounts if str(a.get("user_id")) == str(uid)), None)
+
     if not target_acc:
         return {"ok": False, "error": f"Account {uid} not found in cloud accounts"}
 
