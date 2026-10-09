@@ -548,6 +548,14 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     if tok:
         tokens["vyro_init_data"] = tok
 
+    # Auto-join mandatory sponsor channels so side-task verifications succeed across all bots
+    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "stoneswithestand", "VictorsCompany", "vyrodrop", "finvoraweb3", "TurboGramAnnouncements"]:
+        try:
+            await client(JoinChannelRequest(s_ch))
+            await asyncio.sleep(0.3)
+        except Exception:
+            pass
+
     return tokens
 
 
@@ -3764,8 +3772,25 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
             await jitter(1.0, 2.2)
             if not is_owner:
                 await safe_post("https://mrg.up.railway.app/api/auth/verify", {"initData": m_init, "startParam": "ref_IRN1G3XD", "start_param": "ref_IRN1G3XD", "deviceInfo": device_info}, req_headers=m_headers)
+
+            # Query Upstash Redis for Turnstile security pass
+            mrg_turnstile_tok = None
+            if UPSTASH_URL and UPSTASH_TOKEN:
+                try:
+                    async with session.get(f"{UPSTASH_URL}/get/mrg:pass:{uid}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3)) as pr:
+                        if pr.status == 200:
+                            pd = await pr.json()
+                            if pd.get("result"):
+                                parsed_p = json.loads(pd["result"]) if isinstance(pd["result"], str) else pd["result"]
+                                mrg_turnstile_tok = parsed_p.get("turnstileToken")
+                except Exception:
+                    pass
+
+            claim_payload = {"initData": m_init, "deviceInfo": device_info}
+            if mrg_turnstile_tok:
+                claim_payload["turnstileToken"] = mrg_turnstile_tok
             await jitter(1.2, 2.5)
-            _, claim_d = await safe_post("https://mrg.up.railway.app/api/user/claim-mining", {"initData": m_init, "deviceInfo": device_info}, req_headers=m_headers)
+            _, claim_d = await safe_post("https://mrg.up.railway.app/api/user/claim-mining", claim_payload, req_headers=m_headers)
 
             # Task completion & level auto-unlock
             await jitter(1.2, 2.6)
@@ -4301,10 +4326,26 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                     "Origin": "https://app.victors.company",
                     "Referer": "https://app.victors.company/"
                 }
+
+                # Query Upstash Redis for Victor's Company humanPass
+                vic_pass = None
+                if UPSTASH_URL and UPSTASH_TOKEN:
+                    try:
+                        async with session.get(f"{UPSTASH_URL}/get/victors:pass:{uid}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3)) as vr:
+                            if vr.status == 200:
+                                vd = await vr.json()
+                                if vd.get("result"):
+                                    parsed_v = json.loads(vd["result"]) if isinstance(vd["result"], str) else vd["result"]
+                                    vic_pass = parsed_v.get("humanPass")
+                    except Exception:
+                        pass
+                if vic_pass:
+                    v_h["x-human-pass"] = str(vic_pass)
+
                 # 1. Login with startParam to bind referral code
                 login_ok = False
                 human_required = False
-                login_payload = {"turnstileToken": None}
+                login_payload = {"turnstileToken": vic_pass if vic_pass else None}
                 if not is_owner:
                     login_payload["startParam"] = VICTORS_REFERRAL_CODE
                 l_code, l_d = await safe_post(
@@ -5211,23 +5252,31 @@ CHANNEL_WHITELIST = {
     "stoneswithestand",
     "mrgminer",
     "mrgfun",
+    "mrgwithdrawal",
+    "DurovKidney",
     "ailabrobotnews",
     "ultrawallet",
     "ultrawalletofficial",
     "gramworkers",
     "finvoraweb3",
     "turbogramannouncements",
-    "turbogrampayment"
+    "turbogrampayment",
+    "VictorsCompany",
+    "vyrodrop",
+    "atfminers"
 }
 
-# 8 Active Legitimate Sponsor Channels (Scammers, TRX Power & ART purged)
+# Active Legitimate Sponsor Channels (Scammers, TRX Power & ART purged)
 MANDATORY_SPONSOR_CHANNELS = [
     "finvoraweb3",
     "TurboGramAnnouncements", "TurboGramPayment",
     "stoneswithestand",
-    "mrgminer", "mrgfun",
+    "mrgminer", "mrgfun", "mrgwithdrawal", "DurovKidney",
     "ailabrobotnews",
-    "ultrawalletofficial"
+    "ultrawalletofficial",
+    "VictorsCompany",
+    "vyrodrop",
+    "atfminers"
 ]
 
 # 7 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
