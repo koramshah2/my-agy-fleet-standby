@@ -423,9 +423,21 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     if tok:
         tokens["mrg_init_data"] = tok
 
+    # 2. ATF Miner (@ATF_AIRDROP_bot)
+    atf_param = None if is_master else ATF_REFERRAL_CODE
+    try:
+        b_atf = await client.get_entity(ATF_BOT)
+        if atf_param:
+            await client.send_message(b_atf, f"/start {atf_param}")
+        else:
+            await client.send_message(b_atf, "/start")
+    except Exception:
+        pass
+    tok = await extract_bot_webapp_token(client, ATF_BOT, start_param=atf_param, default_url="https://atfminers.asloni.online/miner/index.html?entry=bot_start", candidate_short_names=["app", "miner", "play"])
+    if tok:
+        tokens["atf_init_data"] = tok
 
-
-    # 2. Victor's Company (@VictorsCompanybot)
+    # 3. Victor's Company (@VictorsCompanybot)
     v_param = None if is_master else VICTORS_REFERRAL_CODE
     try:
         b_vic = await client.get_entity(VICTORS_BOT)
@@ -439,7 +451,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     if tok:
         tokens["victors_init_data"] = tok
 
-    # 3. VyroDrop (@vyrodrop_bot)
+    # 4. VyroDrop (@vyrodrop_bot)
     vy_param = None if is_master else VYRO_REFERRAL_CODE
     try:
         b_vy = await client.get_entity(VYRO_BOT)
@@ -454,7 +466,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         tokens["vyro_init_data"] = tok
 
     # Auto-join mandatory sponsor channels so side-task verifications succeed across all bots
-    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "VictorsCompany", "vyrodrop"]:
+    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "VictorsCompany", "victors_company", "VICWithdrawals", "TheBoss_Victor", "vyrodrop", "atfminers"]:
         try:
             await client(JoinChannelRequest(s_ch))
             await asyncio.sleep(0.3)
