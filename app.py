@@ -3031,6 +3031,29 @@ async def load_fleet_wallets_from_cloud() -> tuple:
         except Exception:
             pass
 
+    # Cloud fallback 1: Upstash Redis REST
+    if UPSTASH_URL and UPSTASH_TOKEN:
+        try:
+            async with aiohttp.ClientSession() as http:
+                if not FLEET_TON_CACHE:
+                    async with http.get(f"{UPSTASH_URL}/get/fleet:wallets:ton", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                        if r.status == 200:
+                            d = await r.json()
+                            if d.get("result"):
+                                FLEET_TON_CACHE = json.loads(d["result"]) if isinstance(d["result"], str) else d["result"]
+                if not FLEET_EVM_CACHE:
+                    async with http.get(f"{UPSTASH_URL}/get/fleet:wallets:evm", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                        if r.status == 200:
+                            d = await r.json()
+                            if d.get("result"):
+                                FLEET_EVM_CACHE = json.loads(d["result"]) if isinstance(d["result"], str) else d["result"]
+            if FLEET_EVM_CACHE and FLEET_TON_CACHE:
+                logger.info(f"Loaded {len(FLEET_EVM_CACHE)} EVM and {len(FLEET_TON_CACHE)} TON wallets from Upstash Redis.")
+                return FLEET_EVM_CACHE, FLEET_TON_CACHE
+        except Exception as e:
+            logger.warning(f"Could not load wallets from Upstash: {e}")
+
+    # Cloud fallback 2: Edge mesh backup zip
     import zipfile, io
     async with aiohttp.ClientSession() as http:
         for cf_url in CF_WORKER_URLS:
@@ -4141,12 +4164,10 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 # 1. Connect dedicated TON wallet if not yet linked
                 target_ton = (acc.get("ton_wallet") or {}).get("address")
                 if not target_ton:
-                    try:
-                        if os.path.exists(os.path.join(BASE_DIR, "fleet_ton_wallets.json")):
-                            with open(os.path.join(BASE_DIR, "fleet_ton_wallets.json"), "r", encoding="utf-8") as tf:
-                                target_ton = json.load(tf).get(uid)
-                    except Exception:
-                        pass
+                    _, ton_cache = await load_fleet_wallets_from_cloud()
+                    if ton_cache:
+                        raw_w = ton_cache.get(str(uid)) or ton_cache.get(uid)
+                        target_ton = raw_w.get("address") if isinstance(raw_w, dict) else raw_w
                 if target_ton:
                     await safe_post("https://finvora-production.up.railway.app/api/wallet/connect", {"address": target_ton, "walletType": "manual"}, fin_h)
 
@@ -4227,14 +4248,10 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 # Connect TON wallet to qualify recruit & unlock Level 1 Miner
                 v_ton_entry = (acc.get("ton_wallet") or {}).get("address")
                 if not v_ton_entry:
-                    try:
-                        if os.path.exists(os.path.join(BASE_DIR, "fleet_ton_wallets.json")):
-                            with open(os.path.join(BASE_DIR, "fleet_ton_wallets.json"), "r", encoding="utf-8") as tf:
-                                t_data = json.load(tf)
-                                raw_w = t_data.get(uid) or t_data.get(str(uid))
-                                v_ton_entry = raw_w.get("address") if isinstance(raw_w, dict) else raw_w
-                    except Exception:
-                        pass
+                    _, ton_cache = await load_fleet_wallets_from_cloud()
+                    if ton_cache:
+                        raw_w = ton_cache.get(str(uid)) or ton_cache.get(uid)
+                        v_ton_entry = raw_w.get("address") if isinstance(raw_w, dict) else raw_w
                 if v_ton_entry and me and not me.get("walletAddress"):
                     await safe_post("https://server.victors.company/api/wallet/connect", json_data={"address": v_ton_entry}, req_headers=v_h)
                     await jitter(0.5, 1.0)
