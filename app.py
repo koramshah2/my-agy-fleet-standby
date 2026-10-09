@@ -466,43 +466,51 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         "synced_at": time.time()
     }
 
+    is_master = (uid == str(REPORT_CHAT_ID) or uid == "6727787768")
+
     # 1. Stones Miners (@stoneswithestand_bot)
     tok = await extract_bot_webapp_token(client, STONES_BOT, default_url="https://app.stoneswithestand.my.id/", candidate_short_names=["app", "miniapp"])
     if tok:
         tokens["stones_init_data"] = tok
 
     # 2. MRG Miner (@mrgminerbot)
-    tok = await extract_bot_webapp_token(client, MRG_BOT, start_param=MRG_REFERRAL_CODE, default_url="https://app.mrgtoken.xyz/", candidate_short_names=["app", "miniapp"])
+    mrg_param = None if is_master else MRG_REFERRAL_CODE
+    tok = await extract_bot_webapp_token(client, MRG_BOT, start_param=mrg_param, default_url="https://app.mrgtoken.xyz/", candidate_short_names=["app", "miniapp"])
     if tok:
         tokens["mrg_init_data"] = tok
 
     # 3. AI Lab Robot (@AiLab_robot)
-    tok = await extract_bot_webapp_token(client, AILAB_BOT, start_param="296852", default_url="https://ailab-agent.online/", candidate_short_names=["app", "agent"])
+    ailab_param = None if is_master else "296852"
+    tok = await extract_bot_webapp_token(client, AILAB_BOT, start_param=ailab_param, default_url="https://ailab-agent.online/", candidate_short_names=["app", "agent"])
     if tok:
         tokens["ailab_init_data"] = tok
 
     # 4. UltraWallet (@UltrawalletTrade_Bot)
-    tok = await extract_bot_webapp_token(client, ULTRAWALLET_BOT, start_param=str(ULTRAWALLET_REFERRAL_CODE), default_url="https://wallet.trxvault.top/", candidate_short_names=["app", "trade", "Trade"])
+    uw_param = None if is_master else str(ULTRAWALLET_REFERRAL_CODE)
+    tok = await extract_bot_webapp_token(client, ULTRAWALLET_BOT, start_param=uw_param, default_url="https://wallet.trxvault.top/", candidate_short_names=["app", "trade", "Trade"])
     if tok:
         tokens["ultrawallet_init_data"] = tok
 
     # 5. ATF Miner (@ATF_AIRDROP_bot)
-    tok = await extract_bot_webapp_token(client, "ATF_AIRDROP_bot", start_param=REPORT_CHAT_ID, default_url="https://atfminers.asloni.online/miner/index.html?entry=bot_start", candidate_short_names=["app", "miner", "play"])
+    atf_param = None if is_master else REPORT_CHAT_ID
+    tok = await extract_bot_webapp_token(client, "ATF_AIRDROP_bot", start_param=atf_param, default_url="https://atfminers.asloni.online/miner/index.html?entry=bot_start", candidate_short_names=["app", "miner", "play"])
     if tok:
         tokens["atf_init_data"] = tok
 
     # 6. FINVORA Web3 (@FINVORAWeb3bot)
-    tok = await extract_bot_webapp_token(client, FINVORA_BOT, start_param=FINVORA_REFERRAL_CODE, default_url="https://finvora-production.up.railway.app/", candidate_short_names=["app", "finvora", "mine", "play"])
+    fin_param = None if is_master else FINVORA_REFERRAL_CODE
+    tok = await extract_bot_webapp_token(client, FINVORA_BOT, start_param=fin_param, default_url="https://finvora-production.up.railway.app/", candidate_short_names=["app", "finvora", "mine", "play"])
     if tok:
         tokens["finvora_init_data"] = tok
 
     # 7. TurboGram V1 (@TurboGramV1_bot)
-    tok = await extract_bot_webapp_token(client, TURBOGRAM_BOT, start_param=TURBOGRAM_REFERRAL_CODE if uid != str(REPORT_CHAT_ID) else None, default_url="https://turbo.tamimdev.dev/", candidate_short_names=["app", "miniapp", "bot", "turbo"])
+    turb_param = None if is_master else TURBOGRAM_REFERRAL_CODE
+    tok = await extract_bot_webapp_token(client, TURBOGRAM_BOT, start_param=turb_param, default_url="https://turbo.tamimdev.dev/", candidate_short_names=["app", "miniapp", "bot", "turbo"])
     if tok:
         tokens["turbogram_init_data"] = tok
 
     # 8. Victor's Company (@VictorsCompanybot)
-    v_param = VICTORS_REFERRAL_CODE if uid != str(REPORT_CHAT_ID) else None
+    v_param = None if is_master else VICTORS_REFERRAL_CODE
     try:
         b_vic = await client.get_entity(VICTORS_BOT)
         if v_param:
@@ -516,7 +524,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         tokens["victors_init_data"] = tok
 
     # 9. VyroDrop (@vyrodrop_bot)
-    vy_param = VYRO_REFERRAL_CODE if uid != str(REPORT_CHAT_ID) else None
+    vy_param = None if is_master else VYRO_REFERRAL_CODE
     try:
         b_vy = await client.get_entity(VYRO_BOT)
         if vy_param:
