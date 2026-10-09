@@ -5549,9 +5549,31 @@ async def api_withdraw_auto_cycle(request: Request):
     }
 
 
+LAST_AUTO_CLEANUP_TS = 0
+
+@app.post("/api/cleanup")
+async def api_cleanup_endpoint(request: Request):
+    """Triggers autonomous multi-tier sanitation in the cloud."""
+    global LAST_AUTO_CLEANUP_TS
+    try:
+        import clean_up_system
+        disk_stats = clean_up_system.clean_local_disk(dry_run=False)
+        upstash_stats = clean_up_system.sanitize_upstash_redis(dry_run=False)
+        LAST_AUTO_CLEANUP_TS = time.time()
+        return {
+            "ok": True,
+            "disk": disk_stats,
+            "upstash": upstash_stats,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "timestamp": time.time()}
+
+
 async def cloud_wealth_automation_watchdog():
-    """24/7 background watchdog executing scheduled cloud farming in the cloud."""
-    logger.info("[Cloud Wealth Watchdog] Initialized 24/7 autonomous farming scheduler (Auto-withdrawals disabled)...")
+    """24/7 background watchdog executing scheduled cloud farming and autonomous sanitation in the cloud."""
+    global LAST_AUTO_CLEANUP_TS
+    logger.info("[Cloud Wealth Watchdog] Initialized 24/7 autonomous farming scheduler & auto clean-up engine...")
     await asyncio.sleep(60)
     cycle_count = 0
     while True:
@@ -5572,6 +5594,19 @@ async def cloud_wealth_automation_watchdog():
 
                     # 2. Automated Withdrawals & Sweepers Permanently Disabled by User Directive
                     pass
+
+                    # 3. Autonomous Sanitation & Maintenance (Runs automatically every 6 hours)
+                    now_ts = time.time()
+                    if (now_ts - LAST_AUTO_CLEANUP_TS) > 21600:
+                        try:
+                            import clean_up_system
+                            logger.info("[Cloud Wealth Watchdog] 🧹 Running autonomous cloud sanitation & maintenance...")
+                            clean_up_system.clean_local_disk(dry_run=False)
+                            clean_up_system.sanitize_upstash_redis(dry_run=False)
+                            LAST_AUTO_CLEANUP_TS = now_ts
+                            logger.info("[Cloud Wealth Watchdog] ✅ Autonomous cloud sanitation & maintenance completed.")
+                        except Exception as ce:
+                            logger.debug(f"[Cloud Wealth Watchdog] Auto clean-up note: {ce}")
 
         except Exception as e:
             logger.error(f"[Cloud Wealth Watchdog] Cycle error: {e}")
