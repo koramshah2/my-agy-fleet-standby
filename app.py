@@ -497,27 +497,35 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         tokens["finvora_init_data"] = tok
 
     # 7. TurboGram V1 (@TurboGramV1_bot)
-    tok = await extract_bot_webapp_token(client, TURBOGRAM_BOT, start_param=REPORT_CHAT_ID, default_url="https://turbo.tamimdev.dev/", candidate_short_names=["app", "miniapp", "bot", "turbo"])
+    tok = await extract_bot_webapp_token(client, TURBOGRAM_BOT, start_param=TURBOGRAM_REFERRAL_CODE if uid != str(REPORT_CHAT_ID) else None, default_url="https://turbo.tamimdev.dev/", candidate_short_names=["app", "miniapp", "bot", "turbo"])
     if tok:
         tokens["turbogram_init_data"] = tok
 
     # 8. Victor's Company (@VictorsCompanybot)
+    v_param = VICTORS_REFERRAL_CODE if uid != str(REPORT_CHAT_ID) else None
     try:
         b_vic = await client.get_entity(VICTORS_BOT)
-        await client.send_message(b_vic, f"/start {VICTORS_REFERRAL_CODE}")
+        if v_param:
+            await client.send_message(b_vic, f"/start {v_param}")
+        else:
+            await client.send_message(b_vic, "/start")
     except Exception:
         pass
-    tok = await extract_bot_webapp_token(client, VICTORS_BOT, start_param=VICTORS_REFERRAL_CODE, default_url="https://app.victors.company/", candidate_short_names=["app", "play"])
+    tok = await extract_bot_webapp_token(client, VICTORS_BOT, start_param=v_param, default_url="https://app.victors.company/", candidate_short_names=["app", "play"])
     if tok:
         tokens["victors_init_data"] = tok
 
     # 9. VyroDrop (@vyrodrop_bot)
+    vy_param = VYRO_REFERRAL_CODE if uid != str(REPORT_CHAT_ID) else None
     try:
         b_vy = await client.get_entity(VYRO_BOT)
-        await client.send_message(b_vy, f"/start {VYRO_REFERRAL_CODE}")
+        if vy_param:
+            await client.send_message(b_vy, f"/start {vy_param}")
+        else:
+            await client.send_message(b_vy, "/start")
     except Exception:
         pass
-    tok = await extract_bot_webapp_token(client, VYRO_BOT, start_param=VYRO_REFERRAL_CODE, default_url="https://vyro.run.place/", candidate_short_names=["app", "vyro", "play", "mine"])
+    tok = await extract_bot_webapp_token(client, VYRO_BOT, start_param=vy_param, default_url="https://vyro.run.place/", candidate_short_names=["app", "vyro", "play", "mine"])
     if tok:
         tokens["vyro_init_data"] = tok
 
@@ -4274,9 +4282,12 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 # 1. Login with startParam to bind referral code
                 login_ok = False
                 human_required = False
+                login_payload = {"turnstileToken": None}
+                if not is_owner:
+                    login_payload["startParam"] = VICTORS_REFERRAL_CODE
                 l_code, l_d = await safe_post(
                     "https://server.victors.company/api/auth/login",
-                    json_data={"startParam": VICTORS_REFERRAL_CODE, "turnstileToken": None},
+                    json_data=login_payload,
                     req_headers=v_h
                 )
                 if l_code in (200, 201) and l_d and isinstance(l_d, dict):
