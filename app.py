@@ -4239,7 +4239,8 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 fin_h = {
                     "Content-Type": "application/json",
                     "X-Telegram-Init-Data": fin_init,
-                    "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-A305F) AppleWebKit/537.36"
+                    "User-Agent": user_agent,
+                    "Referer": "https://finvora-production.up.railway.app/"
                 }
                 # 1. Connect dedicated TON wallet if not yet linked
                 target_ton = (acc.get("ton_wallet") or {}).get("address")
@@ -4252,19 +4253,36 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                         pass
                 if target_ton:
                     await safe_post("https://finvora-production.up.railway.app/api/wallet/connect", {"address": target_ton, "walletType": "manual"}, fin_h)
-                # 2. Start mining, claim instant bonus & regular mining claim
-                await safe_post("https://finvora-production.up.railway.app/api/mining/start", {}, fin_h)
-                await safe_post("https://finvora-production.up.railway.app/api/bonus/instant", {}, fin_h)
-                st_c, cl_d = await safe_post("https://finvora-production.up.railway.app/api/mining/claim", {}, fin_h)
-                if st_c == 401 or (cl_d and "unauthorized" in json.dumps(cl_d).lower()):
+
+                # 2. Get user profile & balances
+                st_me, me_d = await safe_get("https://finvora-production.up.railway.app/api/me", fin_h)
+                if st_me == 401 or (me_d and "unauthorized" in json.dumps(me_d).lower()):
                     status["bots"]["finvora"] = "token_expired (needs 24h refresh)"
                     return
+
+                u_obj = me_d.get("user", {}) if isinstance(me_d, dict) else {}
+
+                # 3. Channel Verification Side Task (validates Telegram sponsor channels and awards bonus)
+                await safe_post("https://finvora-production.up.railway.app/api/channels/verify", {}, fin_h)
+
+                # 4. Instant Bonus if not yet claimed
+                if not u_obj.get("hasClaimedInstantBonus"):
+                    await safe_post("https://finvora-production.up.railway.app/api/bonus/instant", {}, fin_h)
+
+                # 5. Claim regular mining if threshold reached (minClaimGram = 0.05)
+                claimable = float(u_obj.get("claimableMined", 0) or 0)
                 bal_txt = ""
-                if cl_d and isinstance(cl_d, dict):
-                    if cl_d.get("claimed"):
+                if claimable >= 0.05:
+                    st_c, cl_d = await safe_post("https://finvora-production.up.railway.app/api/mining/claim", {}, fin_h)
+                    if cl_d and isinstance(cl_d, dict) and cl_d.get("claimed"):
                         bal_txt = f" (+{cl_d.get('claimed'):.4f} GRAM)"
-                    elif cl_d.get("user", {}).get("withdrawableBalance") is not None:
-                        bal_txt = f" (avail: {cl_d['user']['withdrawableBalance']:.4f} GRAM)"
+                else:
+                    bal_txt = f" (claimable: {claimable:.4f} GRAM)"
+
+                withdrawable = u_obj.get("withdrawableBalance")
+                if withdrawable is not None:
+                    bal_txt += f" [avail: {float(withdrawable):.4f} GRAM]"
+
                 status["bots"]["finvora"] = f"farmed{bal_txt}"
                 return
             except Exception as e:
