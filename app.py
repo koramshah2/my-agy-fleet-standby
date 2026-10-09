@@ -194,27 +194,17 @@ def solve_atf_math(question_text: str) -> str:
             return str(nums[0] // nums[1])
     return "0"
 
-# 9 Active Legitimate Fleet Bots (100% REST Mini-Apps)
+# 5 Active Legitimate Fleet Bots (100% Cloud REST Mini-Apps)
 STONES_BOT = "stoneswithestand_bot"
 STONES_REFERRAL_CODE = "r6727787768"
 MRG_BOT = "mrgminerbot"
 MRG_REFERRAL_CODE = "ref_IRN1G3XD"
-AILAB_BOT = "AiLab_robot"
-AILAB_REFERRAL_CODE = "296852"
-ULTRAWALLET_BOT = "UltrawalletTrade_Bot"
-ULTRAWALLET_REFERRAL_CODE = "6727787768"
 ATF_BOT = "ATF_AIRDROP_bot"
 ATF_REFERRAL_CODE = "6727787768"
-FINVORA_BOT = "FINVORAWeb3bot"
-FINVORA_REFERRAL_CODE = "ref_TRX6727787768"
-# TurboGramV1_bot permanently purged and blacklisted per user directive
 VICTORS_BOT = "VictorsCompanybot"
 VICTORS_REFERRAL_CODE = "ref_A20AA96F18"
 VYRO_BOT = "vyrodrop_bot"
 VYRO_REFERRAL_CODE = "ref_myFjrqqE4WN_"
-BNB_BOT = "CryptoProUpRobot"
-
-UW_ID_TOKENS = {}
 
 LAST_BATCH_RUN = {
     "status": "idle",
@@ -272,10 +262,9 @@ def is_token_data_expired(t_dict: dict, max_age_hours: float = 20.0) -> bool:
     except Exception:
         return True
 
-    # Check individual token auth_date signatures (7 Legitimate WebApp Bots)
+    # Check individual token auth_date signatures (5 Legitimate WebApp Bots)
     key_tokens = [
-        "stones_init_data", "mrg_init_data", "ailab_init_data",
-        "ultrawallet_init_data", "atf_init_data", "finvora_init_data",
+        "stones_init_data", "mrg_init_data", "atf_init_data",
         "victors_init_data", "vyro_init_data"
     ]
     missing_cnt = 0
@@ -489,31 +478,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     if tok:
         tokens["mrg_init_data"] = tok
 
-    # 3. AI Lab Robot (@AiLab_robot)
-    ailab_param = None if is_master else "296852"
-    tok = await extract_bot_webapp_token(client, AILAB_BOT, start_param=ailab_param, default_url="https://ailab-agent.online/", candidate_short_names=["app", "agent"])
-    if tok:
-        tokens["ailab_init_data"] = tok
 
-    # 4. UltraWallet (@UltrawalletTrade_Bot)
-    uw_param = None if is_master else str(ULTRAWALLET_REFERRAL_CODE)
-    tok = await extract_bot_webapp_token(client, ULTRAWALLET_BOT, start_param=uw_param, default_url="https://wallet.trxvault.top/", candidate_short_names=["app", "trade", "Trade"])
-    if tok:
-        tokens["ultrawallet_init_data"] = tok
-
-    # 5. ATF Miner (@ATF_AIRDROP_bot)
-    atf_param = None if is_master else REPORT_CHAT_ID
-    tok = await extract_bot_webapp_token(client, "ATF_AIRDROP_bot", start_param=atf_param, default_url="https://atfminers.asloni.online/miner/index.html?entry=bot_start", candidate_short_names=["app", "miner", "play"])
-    if tok:
-        tokens["atf_init_data"] = tok
-
-    # 6. FINVORA Web3 (@FINVORAWeb3bot)
-    fin_param = None if is_master else FINVORA_REFERRAL_CODE
-    tok = await extract_bot_webapp_token(client, FINVORA_BOT, start_param=fin_param, default_url="https://finvora-production.up.railway.app/", candidate_short_names=["app", "finvora", "mine", "play"])
-    if tok:
-        tokens["finvora_init_data"] = tok
-
-    # 7. TurboGram V1: Purged & blacklisted
 
     # 8. Victor's Company (@VictorsCompanybot)
     v_param = None if is_master else VICTORS_REFERRAL_CODE
@@ -544,7 +509,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         tokens["vyro_init_data"] = tok
 
     # Auto-join mandatory sponsor channels so side-task verifications succeed across all bots
-    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "stoneswithestand", "VictorsCompany", "vyrodrop", "finvoraweb3"]:
+    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "stoneswithestand", "VictorsCompany", "vyrodrop"]:
         try:
             await client(JoinChannelRequest(s_ch))
             await asyncio.sleep(0.3)
@@ -1298,17 +1263,16 @@ async def sync_account_tokens_to_clouds(tokens: dict):
 async def bootstrap_account_mining(acc_entry: dict, tokens: dict):
     """
     Kicks off initial WebApp mining, completes referral onboarding finish work,
-    and runs first-cycle claims across all 7 legitimate bots:
+    and runs first-cycle claims across all 5 legitimate bots:
     1. Stones Miners (/api/mining/start, /api/claim, dynamic tasks, stone breaker, boost)
     2. MRG Miner (/api/user/claim-mining, /api/user/claim-task, referral commission)
-    3. AI Lab Robot (/users/auth/login, /miner-start_mining, /miner-exchange_hashes, tasks)
-    4. UltraWallet (/telegramLogin, /mining/start, /checkin/claim, lucky spins, tasks, ads, gift box)
-    5. ATF Miner (login, math challenge -> /start_mine, speed boost, tasks, referral claim)
-    6. FINVORA Web3 (/api/bonus/instant, /api/mining/claim)
+    3. ATF Miner (login, math challenge -> /start_mine, speed boost, tasks, referral claim)
+    4. Victor's Company (/api/users/profile, /api/tasks, deep mining)
+    5. VyroDrop (/api/user, /api/task, ton wallet link)
     """
     uid = str(acc_entry.get("user_id"))
     name = acc_entry.get("name", "User")
-    logger.info(f"[{name}] ⚡ Bootstrapping initial cloud mining & completing referral finish work across all 7 legitimate bots...")
+    logger.info(f"[{name}] ⚡ Bootstrapping initial cloud mining & completing referral finish work across all 5 legitimate bots...")
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 Telegram-Android/11.0.0"
@@ -1415,94 +1379,7 @@ async def bootstrap_account_mining(acc_entry: dict, tokens: dict):
             except Exception as e:
                 logger.debug(f"[{name}] MRG bootstrap note: {e}")
 
-        # 3. AI Lab Robot
-        if tokens.get("ailab_init_data"):
-            try:
-                ai_init = tokens["ailab_init_data"]
-                ai_base = "https://api.ailab-agent.online/api/v1"
-                async with http.post(f"{ai_base}/users/auth/login", json={"user": ai_init}, timeout=aiohttp.ClientTimeout(total=8)) as r:
-                    if r.status == 200:
-                        ld = await r.json()
-                        tok = ld.get("result", {}).get("bearer") or ld.get("user_info", {}).get("session_id")
-                        if tok:
-                            ai_auth = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json", "User-Agent": headers["User-Agent"]}
-                            await http.post(f"{ai_base}/miner-start_mining", json={"start_mining": True}, headers=ai_auth, timeout=aiohttp.ClientTimeout(total=8))
-                            try:
-                                async with http.get(f"{ai_base}/miner", headers=ai_auth, timeout=aiohttp.ClientTimeout(total=5)) as mr:
-                                    if mr.status == 200:
-                                        md = await mr.json()
-                                        h_bal = float(md.get("result", {}).get("miner", {}).get("hashes_balance", 0))
-                                        if h_bal >= 3.0:
-                                            await http.post(f"{ai_base}/miner-exchange_hashes", json={"exchange": True}, headers=ai_auth, timeout=aiohttp.ClientTimeout(total=5))
-                            except Exception:
-                                pass
-                            try:
-                                async with http.get(f"{ai_base}/tasks", headers=ai_auth, timeout=aiohttp.ClientTimeout(total=5)) as tr:
-                                    if tr.status == 200:
-                                        td = await tr.json()
-                                        tasks = td.get("result", {}).get("referral", []) + td.get("result", {}).get("follow", []) + td.get("result", {}).get("social", [])
-                                        for t in tasks:
-                                            if t.get("id") and t.get("status") != "completed":
-                                                await http.post(f"{ai_base}/task-check", json={"task_id": t["id"], "action": "start"}, headers=ai_auth, timeout=aiohttp.ClientTimeout(total=4))
-                                                await http.post(f"{ai_base}/task-check", json={"task_id": t["id"], "action": "check"}, headers=ai_auth, timeout=aiohttp.ClientTimeout(total=4))
-                            except Exception:
-                                pass
-                            logger.info(f"[{name}] ✅ AI Lab initial mining started & tasks checked")
-            except Exception as e:
-                logger.debug(f"[{name}] AI Lab bootstrap note: {e}")
 
-        # 5. UltraWallet
-        if tokens.get("ultrawallet_init_data"):
-            try:
-                uw_init = tokens["ultrawallet_init_data"]
-                uw_base = "https://wallet.trxvault.top/api"
-                ref_by_val = "" if is_master else "6727787768"
-                async with http.post(f"{uw_base}/telegramLogin", json={"initData": uw_init, "refBy": ref_by_val}, timeout=aiohttp.ClientTimeout(total=8)) as r:
-                    if r.status == 200:
-                        ud = await r.json()
-                        cust_tok = ud.get("token")
-                        if cust_tok:
-                            fb_url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=AIzaSyAIKTCEFqC5LFRc89nuOLhTGPHIZTIjEsU"
-                            async with http.post(fb_url, json={"token": cust_tok, "returnSecureToken": True}, timeout=aiohttp.ClientTimeout(total=8)) as fbr:
-                                if fbr.status == 200:
-                                    fbd = await fbr.json()
-                                    id_tok = fbd.get("idToken")
-                                    if id_tok:
-                                        uw_h = {"Authorization": f"Bearer {id_tok}", "Content-Type": "application/json", "User-Agent": headers["User-Agent"]}
-                                        await http.post(f"{uw_base}/checkin/claim", json={}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=6))
-                                        await http.post(f"{uw_base}/mining/claim", json={}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=6))
-                                        await http.post(f"{uw_base}/mining/start", json={}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=6))
-                                        await http.post(f"{uw_base}/energy/claim", json={}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=6))
-                                        try:
-                                            async with http.get(f"{uw_base}/spin/status", headers=uw_h, timeout=aiohttp.ClientTimeout(total=5)) as spr:
-                                                if spr.status == 200:
-                                                    spi = await spr.json()
-                                                    spins = (spi.get("tickets", 0)) + (spi.get("freeSpinsRemaining", 0))
-                                                    for _ in range(min(spins, 3)):
-                                                        await http.post(f"{uw_base}/spin/play", json={}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=4))
-                                        except Exception:
-                                            pass
-                                        try:
-                                            async with http.get(f"{uw_base}/tasks", headers=uw_h, timeout=aiohttp.ClientTimeout(total=5)) as utr:
-                                                if utr.status == 200:
-                                                    utd = await utr.json()
-                                                    for t in utd.get("tasks", []):
-                                                        if not t.get("completed") and t.get("id"):
-                                                            await http.post(f"{uw_base}/tasks/start", json={"taskId": t["id"]}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=4))
-                                                            await http.post(f"{uw_base}/tasks/complete", json={"taskId": t["id"]}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=4))
-                                        except Exception:
-                                            pass
-                                        try:
-                                            async with http.get(f"{uw_base}/giftBox", headers=uw_h, timeout=aiohttp.ClientTimeout(total=5)) as gbr:
-                                                if gbr.status == 200:
-                                                    gbd = await gbr.json()
-                                                    if gbd.get("enabled") and gbd.get("canOpen"):
-                                                        await http.post(f"{uw_base}/giftBox/claim", json={}, headers=uw_h, timeout=aiohttp.ClientTimeout(total=4))
-                                        except Exception:
-                                            pass
-                                        logger.info(f"[{name}] ✅ UltraWallet initial mining & tasks completed")
-            except Exception as e:
-                logger.debug(f"[{name}] UltraWallet bootstrap note: {e}")
 
         # 5. ATF Miner (Comprehensive Referral Finish Work: Login, Math Challenge Solve, Start Mine, Tasks, Boost)
         if tokens.get("atf_init_data"):
@@ -1549,38 +1426,14 @@ async def bootstrap_account_mining(acc_entry: dict, tokens: dict):
                 logger.info(f"[{name}] ✅ ATF Miner referral finish work & starter tasks completed")
             except Exception as e:
                 logger.debug(f"[{name}] ATF Miner bootstrap note: {e}")
-        # 6. FINVORA Web3
-        if tokens.get("finvora_init_data"):
-            try:
-                fin_init = tokens["finvora_init_data"]
-                fin_h = {
-                    "Content-Type": "application/json",
-                    "X-Telegram-Init-Data": fin_init,
-                    "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-A305F) AppleWebKit/537.36"
-                }
-                target_ton = (acc_entry.get("ton_wallet") or {}).get("address")
-                if target_ton:
-                    await http.post("https://finvora-production.up.railway.app/api/wallet/connect", json={"address": target_ton, "walletType": "manual"}, headers=fin_h, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://finvora-production.up.railway.app/api/bonus/instant", json={}, headers=fin_h, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://finvora-production.up.railway.app/api/mining/claim", json={}, headers=fin_h, timeout=aiohttp.ClientTimeout(total=8))
-                logger.info(f"[{name}] ✅ FINVORA Web3 initial bootstrap claim completed")
-            except Exception as e:
-                logger.debug(f"[{name}] FINVORA bootstrap note: {e}")
-
-        # TurboGram V1: Purged
-
-
 def is_account_referrals_bound(acc_entry: dict) -> bool:
-    """Checks whether an account already has its master referrals bound across all 9 active legitimate bots."""
-    if acc_entry.get("all_9_referrals_bound"):
+    """Checks whether an account already has its master referrals bound across all 5 active legitimate bots."""
+    if acc_entry.get("all_5_referrals_bound") or acc_entry.get("all_9_referrals_bound"):
         return True
     return bool(
         acc_entry.get("atf_referral_bound") and
         acc_entry.get("stones_referral_bound") and
         acc_entry.get("mrg_referral_bound") and
-        acc_entry.get("ailab_referral_bound") and
-        acc_entry.get("ultrawallet_referral_bound") and
-        acc_entry.get("finvora_referral_bound") and
         acc_entry.get("victors_referral_bound") and
         acc_entry.get("vyro_referral_bound")
     )
@@ -1831,80 +1684,19 @@ def _extract_tg_init_data(url: str) -> str:
 
 
 
-async def complete_finvora_referral(client: TelegramClient, name: str, ref_code: str = "ref_TRX6727787768"):
-    try:
-        await join_tg_target(client, "finvoraweb3", name)
-        b_fin = await client.get_entity(FINVORA_BOT)
-        await mute_peer(client, b_fin, name)
-        await client.send_message(b_fin, f"/start {ref_code}")
-        await asyncio.sleep(1.5)
 
-        # Direct WebApp handshake with exact Railway production Mini App URL
-        try:
-            await client(RequestWebViewRequest(
-                peer=b_fin,
-                bot=b_fin,
-                url="https://finvora-production.up.railway.app/",
-                platform="android",
-                start_param=str(ref_code)
-            ))
-            logger.info(f"[{name}] ✅ FINVORA completed referral & direct webview handshake (Railway)")
-            return True
-        except Exception as we:
-            logger.debug(f"[{name}] FINVORA direct webview note: {we}")
-
-        # Fallback to inspecting message buttons
-        msgs = await client.get_messages(b_fin, limit=5)
-        for m in msgs:
-            if m.buttons:
-                for r_idx, row in enumerate(m.buttons):
-                    for c_idx, b in enumerate(row):
-                        b_url = getattr(b, "url", None)
-                        if not b_url and hasattr(b, "button") and hasattr(b.button, "type") and hasattr(b.button.type, "url"):
-                            b_url = b.button.type.url
-                        if b_url and ("tgWebApp" in b_url or "http" in b_url):
-                            try:
-                                await client(RequestWebViewRequest(
-                                    peer=b_fin,
-                                    bot=b_fin,
-                                    url=b_url,
-                                    platform="android",
-                                    start_param=str(ref_code)
-                                ))
-                                logger.info(f"[{name}] ✅ FINVORA completed referral via inline button URL")
-                                return True
-                            except Exception:
-                                pass
-
-        b_fin_in = await client.get_input_entity(FINVORA_BOT)
-        for sn in ["app", "miniapp", "bot"]:
-            try:
-                await client(RequestAppWebViewRequest(
-                    peer=b_fin_in,
-                    app=InputBotAppShortName(bot_id=b_fin_in, short_name=sn),
-                    platform="android",
-                    start_param=str(ref_code)
-                ))
-                return True
-            except Exception:
-                pass
-        return True
-    except Exception as e:
-        logger.warning(f"[{name}] FINVORA referral completion note: {e}")
-    return False
 
 
 async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict):
     """
     Guarantees master referral codes are registered ONCE per account for 1st-time newly added accounts,
     extracts WebApp session tokens, syncs to 5x Cloudflare KV + Upstash,
-    and executes referral finish work across all 7 legitimate bots:
+    and executes referral finish work across all 5 legitimate bots:
     1. Stones: r6727787768
     2. MRG: ref_IRN1G3XD
-    3. AI Lab: 296852
-    4. UltraWallet: 6727787768
-    5. ATF Miner: 6727787768
-    6. FINVORA: ref_TRX6727787768
+    3. ATF Miner: 6727787768
+    4. Victor's Company: ref_A20AA96F18
+    5. VyroDrop: ref_myFjrqqE4WN_
     """
     name = acc_entry.get("name", "User")
     uid = acc_entry.get("user_id")
@@ -1970,42 +1762,8 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
         except Exception as e:
             logger.warning(f"[{name}] MRG referral bind note: {e}")
 
-    # 3. AI Lab Robot
-    if not acc_entry.get("ailab_referral_bound"):
-        try:
-            b_ai = await client.get_entity(AILAB_BOT)
-            await client.send_message(b_ai, "/start 296852")
-            acc_entry["ailab_referral_bound"] = True
-            await asyncio.sleep(0.8)
-        except Exception as e:
-            logger.warning(f"[{name}] AI Lab referral bind note: {e}")
 
-    # 4. UltraWallet (Strict WebApp initData + refBy Handshake)
-    if not acc_entry.get("ultrawallet_referral_bound"):
-        try:
-            b_uw = await client.get_entity(ULTRAWALLET_BOT)
-            await client.send_message(b_uw, f"/start {ULTRAWALLET_REFERRAL_CODE}")
-            try:
-                b_uw_in = await client.get_input_entity(ULTRAWALLET_BOT)
-                res_uw = await client(RequestAppWebViewRequest(
-                    peer=b_uw_in,
-                    app=InputBotAppShortName(bot_id=b_uw_in, short_name="app"),
-                    platform="android",
-                    start_param=str(ULTRAWALLET_REFERRAL_CODE)
-                ))
-                p_uw = urllib.parse.urlparse(res_uw.url)
-                uw_init = urllib.parse.parse_qs(p_uw.fragment).get("tgWebAppData", [None])[0]
-                if uw_init:
-                    async with aiohttp.ClientSession() as hs:
-                        await hs.post("https://wallet.trxvault.top/api/telegramLogin", json={"initData": uw_init, "refBy": str(ULTRAWALLET_REFERRAL_CODE)}, timeout=aiohttp.ClientTimeout(total=8))
-            except Exception as uwe:
-                logger.debug(f"[{name}] UltraWallet direct app verify note: {uwe}")
-            acc_entry["ultrawallet_referral_bound"] = True
-            await asyncio.sleep(0.8)
-        except Exception as e:
-            logger.warning(f"[{name}] UltraWallet referral bind note: {e}")
-
-    # 5. ATF Miner
+    # 3. ATF Miner
     if not acc_entry.get("atf_referral_bound"):
         try:
             b_atf = await client.get_entity("ATF_AIRDROP_bot")
@@ -2015,15 +1773,7 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
         except Exception as e:
             logger.warning(f"[{name}] ATF referral bind note: {e}")
 
-    # 6. FINVORA Web3 (Channel join + WebApp handshake)
-    if not acc_entry.get("finvora_referral_bound"):
-        if await complete_finvora_referral(client, name, FINVORA_REFERRAL_CODE):
-            acc_entry["finvora_referral_bound"] = True
-        await asyncio.sleep(1.0)
-
-        await asyncio.sleep(1.0)
-
-    # 8. Victor's Company (@VictorsCompanybot)
+    # 4. Victor's Company (@VictorsCompanybot)
     if not acc_entry.get("victors_referral_bound"):
         try:
             b_vic = await client.get_entity(VICTORS_BOT)
@@ -2069,11 +1819,9 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
     except Exception:
         pass
 
-    # Fallback: if tokens is missing required bot keys, re-extract with fresh standalone client (9 Legitimate WebApp Bots)
+    # Fallback: if tokens is missing required bot keys, re-extract with fresh standalone client (5 Legitimate WebApp Bots)
     req_keys = [
-        "stones_init_data", "mrg_init_data", "ailab_init_data",
-        "ultrawallet_init_data", "atf_init_data",
-        "finvora_init_data", "victors_init_data", "vyro_init_data",
+        "stones_init_data", "mrg_init_data", "atf_init_data",
         "victors_init_data", "vyro_init_data"
     ]
     if not tokens or any(not tokens.get(k) for k in req_keys):
@@ -2501,23 +2249,6 @@ async def bind_wallets_to_bots(http_session, acc_entry: dict, tokens: dict):
         except Exception as ae:
             logger.debug(f"[{name}] ATF wallet bind note: {ae}")
 
-    # 4. FINVORA Web3 TON Binding
-    if tokens.get("finvora_init_data") and target_ton:
-        try:
-            fin_init = tokens["finvora_init_data"]
-            fin_h = {"Content-Type": "application/json", "X-Telegram-Init-Data": fin_init, "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-A305F)"}
-            await http_session.post(
-                "https://finvora-production.up.railway.app/api/wallet/connect",
-                json={"address": target_ton, "walletType": "manual"},
-                headers=fin_h,
-                timeout=aiohttp.ClientTimeout(total=8)
-            )
-            logger.info(f"[{name}] 💎 Bound FINVORA Web3 TON wallet: {target_ton[:12]}...")
-        except Exception as fe:
-            logger.debug(f"[{name}] FINVORA wallet bind note: {fe}")
-
-
-
 async def notify_admin_new_account_onboarded(acc_entry: dict):
     """Sends structured Telegram alert to Master Admin upon new account onboarding."""
     bot_token = os.getenv("REPORT_BOT_TOKEN", "8858823950:AAEdX47g7as1xLYEudfRUHaVGUdNIaU_ku8")
@@ -2548,12 +2279,9 @@ async def notify_admin_new_account_onboarded(acc_entry: dict):
         f"• ATF Miner: TON Connected ✅\n"
         f"• Stones Miner: EVM Bound ✅\n"
         f"• MRG Miner: TON Connected ✅\n"
-        f"• AI Lab: Active Hashes & Balance ✅\n"
-        f"• UltraWallet: Active USDT & LT ✅\n"
-        f"• FINVORA Web3: TON Connected ✅\n"
         f"• Victor's Company: Active ✅\n"
         f"• VyroDrop: Active ✅\n\n"
-        f"🚀 <b>Auto-Farming Status:</b> Active across all 8 legitimate bots in the cloud!"
+        f"🚀 <b>Auto-Farming Status:</b> Active across all 5 legitimate bots in the cloud!"
     )
     async with aiohttp.ClientSession() as s:
         try:
@@ -2872,50 +2600,7 @@ async def send_payout_receipt(message: str, dedupe_key: str = None):
                 pass
 
 
-async def check_and_withdraw_ailab(session: aiohttp.ClientSession, acc: dict, tokens: dict) -> dict:
-    """Checks and executes auto-withdrawal for AI Lab Robot (Threshold: $0.02 for master, $1.00 for workers)."""
-    uid = str(acc.get("user_id"))
-    name = acc.get("name", uid)
-    if not ENABLE_AUTO_WITHDRAWALS:
-        return {"uid": uid, "name": name, "status": "disabled_by_policy", "balance": 0.0}
-    is_master = (uid == "6727787768" or acc.get("phone") in ("+8801317342850", "01317342850") or acc.get("is_primary"))
-    init_data = tokens.get(uid, {}).get("ailab_init_data")
-    if not init_data:
-        return {"uid": uid, "name": name, "status": "no_init_data", "balance": 0.0}
 
-    base_url = "https://api.ailab-agent.online/api/v1"
-    headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro)"}
-    try:
-        async with session.post(f"{base_url}/users/auth/login", json={"user": init_data}, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as lr:
-            if lr.status != 200:
-                return {"uid": uid, "name": name, "status": f"login_err_{lr.status}", "balance": 0.0}
-            ld = await lr.json()
-            tok = ld.get("result", {}).get("bearer") or ld.get("user_info", {}).get("session_id")
-            if not tok:
-                return {"uid": uid, "name": name, "status": "no_token", "balance": 0.0}
-
-        auth_headers = {**headers, "Authorization": f"Bearer {tok}"}
-        async with session.get(f"{base_url}/cashout", headers=auth_headers, timeout=aiohttp.ClientTimeout(total=8)) as cr:
-            if cr.status != 200:
-                return {"uid": uid, "name": name, "status": f"cashout_err_{cr.status}", "balance": 0.0}
-            cd = await cr.json()
-            ubal = float(cd.get("user_info", {}).get("balance", 0) or 0)
-
-        thresh = 0.02 if is_master else 1.00
-        logger.info(f"[Cloud AI Lab] {name} ({uid}) balance: ${ubal:.4f} USD (Threshold: ${thresh:.2f})")
-        if ubal >= thresh:
-            wd_usd = round(int(ubal * 100) / 100.0, 2)
-            target_wallet = (acc.get("evm_wallet") or {}).get("address") or MASTER_EVM_VAULT
-            async with session.post(f"{base_url}/cashout-pay", json={"ps_id": 5, "amount_usd": wd_usd, "wallet": target_wallet, "dest_tag": ""}, headers=auth_headers, timeout=aiohttp.ClientTimeout(total=10)) as pr:
-                pres = await pr.json()
-                if pres.get("request_info", {}).get("error_code") == 0 or pres.get("result"):
-                    role_str = "Main Master Host" if is_master else "Worker"
-                    logger.info(f"[Cloud AI Lab] {name} ({role_str}) auto-cashout submitted: ${wd_usd} USD -> {target_wallet}")
-                    return {"uid": uid, "name": name, "status": "withdrawn", "amount": wd_usd, "wallet": target_wallet}
-        return {"uid": uid, "name": name, "status": "below_threshold", "balance": ubal}
-    except Exception as e:
-        logger.warning(f"[Cloud AI Lab] Error for {name}: {e}")
-        return {"uid": uid, "name": name, "status": "error", "error": str(e)}
 
 
 async def check_and_withdraw_stones(session: aiohttp.ClientSession, acc: dict, tokens: dict) -> dict:
@@ -3497,7 +3182,7 @@ async def fetch_cloud_miniapp_tokens(session: aiohttp.ClientSession) -> dict:
 
 async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, acc_tokens: dict) -> dict:
     """
-    Farms all 8 legitimate active bots (Stones, MRG, AI Lab, UltraWallet, ATF, FINVORA, Victor's Company, VyroDrop) for a single account.
+    Farms all 5 legitimate active bots (Stones, MRG, ATF, Victor's Company, VyroDrop) for a single account.
     Engineered with:
       - Deterministic mobile device fingerprinting per account (eliminates bot signatures)
       - Realistic human jitter delays
@@ -3813,257 +3498,9 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
             status["bots"]["mrg"] = f"error: {format_error(e)}"
 
 
-    # 4. AI Lab Robot
-    async def _farm_ailab():
-        if not tokens.get("ailab_init_data"):
-            return
-        try:
-            ai_init = tokens["ailab_init_data"]
-            ai_base = "https://api.ailab-agent.online/api/v1"
-            ai_default_h = {
-                **headers,
-                "Origin": "https://ailab-agent.online",
-                "Referer": "https://ailab-agent.online/"
-            }
-            await jitter(1.0, 2.2)
-            ai_login_p = {"user": ai_init}
-            if not is_owner:
-                ai_login_p["invite_code"] = "296852"
-                ai_login_p["ref"] = "296852"
-            _, ld = await safe_post(f"{ai_base}/users/auth/login", ai_login_p, req_headers=ai_default_h)
-            cur_bal = None
-            h_bal = 0.0
-            if ld and isinstance(ld, dict):
-                res_obj = ld.get("result")
-                tok = res_obj.get("bearer") if isinstance(res_obj, dict) else None
-                if isinstance(res_obj, dict):
-                    cur_bal = res_obj.get("balance")
-                if not tok:
-                    u_info = ld.get("user_info")
-                    if isinstance(u_info, dict):
-                        tok = u_info.get("session_id")
-                        if cur_bal is None:
-                            cur_bal = u_info.get("balance")
 
-                if tok:
-                    ai_auth = {**ai_default_h, "Authorization": f"Bearer {tok}"}
-                    # Check miner
-                    try:
-                        _, md = await safe_get(f"{ai_base}/miner", ai_auth)
-                        if md and isinstance(md, dict):
-                            m_res = md.get("result")
-                            cur_m = {}
-                            if isinstance(m_res, dict):
-                                miner_dict = m_res.get("miner")
-                                if isinstance(miner_dict, dict):
-                                    cur_m = miner_dict.get("current_miner", {})
-                                    h_bal = float(miner_dict.get("hashes_balance", 0) or 0)
-                            is_running = cur_m.get("is_running") and (cur_m.get("time_left", 0) > 0)
-                            if not is_running:
-                                await jitter(1.0, 2.0)
-                                await safe_post(f"{ai_base}/miner-start_mining", {"start_mining": True}, ai_auth)
-                            if h_bal >= 3.0:
-                                await jitter(1.0, 2.0)
-                                await safe_post(f"{ai_base}/miner-exchange_hashes", {"exchange": True}, ai_auth)
-                    except Exception:
-                        pass
 
-                    # Discover all tasks across buckets (social, follow, referral, etc.)
-                    try:
-                        _, td = await safe_get(f"{ai_base}/tasks", ai_auth)
-                        if td and isinstance(td, dict):
-                            t_res = td.get("result")
-                            tasks = []
-                            if isinstance(t_res, list):
-                                tasks = [item for item in t_res if isinstance(item, dict)]
-                            elif isinstance(t_res, dict):
-                                for v in t_res.values():
-                                    if isinstance(v, list):
-                                        tasks.extend([item for item in v if isinstance(item, dict)])
-                            for t in tasks:
-                                tid = t.get("id")
-                                if tid and t.get("status") not in ["completed", "claimed"] and not t.get("is_claimed"):
-                                    if t.get("progress_finish") and (t.get("progress_current", 0) < t.get("progress_finish")):
-                                        continue
-                                    await jitter(1.2, 2.5)
-                                    await safe_post(f"{ai_base}/task-check", {"task_id": tid, "action": "start"}, ai_auth)
-                                    is_ext = ("follow" in t or "social" in t or "channel" in str(t.get("title", "")).lower())
-                                    ai_wait = random.uniform(15.0, 17.0) if is_ext else 3.5
-                                    async def _ailab_check_task(task_id, wait_time):
-                                        await asyncio.sleep(wait_time)
-                                        await safe_post(f"{ai_base}/task-check", {"task_id": task_id, "action": "check"}, ai_auth)
-                                    bg_tasks.append(asyncio.create_task(_ailab_check_task(tid, ai_wait)))
-                    except Exception:
-                        pass
 
-                    # AI Lab auto-cashout permanently DISABLED to prevent wrong-address routing
-                    # All fleet accounts accumulate USD and compute hashes safely in compounding mode
-
-            bal_str = ""
-            if cur_bal is not None:
-                bal_str = f" (bal: ${float(cur_bal):.4f}{f', {h_bal:.1f} hashes' if h_bal else ''})"
-            status["bots"]["ailab"] = f"farmed{bal_str}"
-        except Exception as e:
-            status["bots"]["ailab"] = f"error: {format_error(e)}"
-
-    # 5. UltraWallet
-    async def _farm_ultra():
-        if not tokens.get("ultrawallet_init_data"):
-            return
-        try:
-            uw_init = tokens["ultrawallet_init_data"]
-            uw_base = "https://wallet.trxvault.top/api"
-            uw_origin_h = {
-                **headers,
-                "Origin": "https://wallet.trxvault.top",
-                "Referer": "https://wallet.trxvault.top/"
-            }
-            cached_entry = UW_ID_TOKENS.get(str(uid))
-            id_tok = cached_entry[0] if (cached_entry and time.time() < cached_entry[1] - 120) else None
-            if not id_tok and UPSTASH_URL and UPSTASH_TOKEN:
-                try:
-                    async with session.get(f"{UPSTASH_URL}/get/fleet:uw_id_token:{uid}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3)) as ur:
-                        if ur.status == 200:
-                            udata = await ur.json()
-                            if udata.get("result"):
-                                id_tok = udata["result"]
-                                UW_ID_TOKENS[str(uid)] = (id_tok, time.time() + 1800)
-                except Exception:
-                    pass
-
-            if not id_tok:
-                for uw_att in range(3):
-                    await jitter(1.5 + uw_att * 2.0, 3.5 + uw_att * 2.5)
-                    ref_by_uw = "" if is_owner else "6727787768"
-                    st_lg, ud = await safe_post(f"{uw_base}/telegramLogin", {"initData": uw_init, "refBy": ref_by_uw}, req_headers=uw_origin_h)
-                    if ud and isinstance(ud, dict):
-                        cust_tok = ud.get("token")
-                        if cust_tok:
-                            fb_url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=AIzaSyAIKTCEFqC5LFRc89nuOLhTGPHIZTIjEsU"
-                            _, fbd = await safe_post(fb_url, {"token": cust_tok, "returnSecureToken": True}, req_headers=headers)
-                            if fbd and isinstance(fbd, dict):
-                                id_tok = fbd.get("idToken")
-                                if id_tok:
-                                    UW_ID_TOKENS[str(uid)] = (id_tok, time.time() + 3300)
-                                    if UPSTASH_URL and UPSTASH_TOKEN:
-                                        try:
-                                            await safe_post(f"{UPSTASH_URL}/set/fleet:uw_id_token:{uid}?EX=3300", id_tok, req_headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"})
-                                        except Exception:
-                                            pass
-                                    break
-                        err_str = str(ud.get("error", "")).lower()
-                        if "too many" in err_str or "slow down" in err_str or st_lg == 429:
-                            await asyncio.sleep(random.uniform(5.0, 9.0))
-                            continue
-
-            if id_tok:
-                uw_h = {**uw_origin_h, "Authorization": f"Bearer {id_tok}"}
-                uw_usdt = 0.0
-                pend_lt = 0.0
-                try:
-                    _, ms_d = await safe_get(f"{uw_base}/mining/status", uw_h)
-                    if ms_d and isinstance(ms_d, dict):
-                        pend_lt = float(ms_d.get("mining", {}).get("pendingAmount", 0) or 0)
-                except Exception:
-                    pass
-                await jitter(1.0, 2.0)
-                await safe_post(f"{uw_base}/checkin/claim", {}, uw_h)
-                await jitter(1.0, 2.0)
-                await safe_post(f"{uw_base}/mining/claim", {}, uw_h)
-                await jitter(1.0, 2.0)
-                await safe_post(f"{uw_base}/mining/start", {}, uw_h)
-                await jitter(1.0, 2.0)
-                await safe_post(f"{uw_base}/energy/claim", {}, uw_h)
-
-                # Watch & Earn Ad Spins + Lucky Spins Wheel
-                try:
-                    _, spi = await safe_get(f"{uw_base}/spin/status", uw_h)
-                    if spi and isinstance(spi, dict):
-                        uw_usdt = float(spi.get("walletCoinBalances", {}).get("USDT", 0) or spi.get("coinBalances", {}).get("USDT", 0) or 0)
-                        watch_info = spi.get("watchAdSpins", {})
-                        used_ad_spins = watch_info.get("used", 0) or 0
-                        max_ad_spins = watch_info.get("max", 10) or 10
-                        ad_spins_to_claim = min(max_ad_spins - used_ad_spins, 4)
-                        for _ in range(max(0, ad_spins_to_claim)):
-                            await jitter(1.5, 3.0)
-                            _, war = await safe_post(f"{uw_base}/spin/watchAdSpin", {}, uw_h)
-                            if not war or not war.get("ok"):
-                                break
-                        # Fetch updated tickets and spin the wheel
-                        _, spi_after = await safe_get(f"{uw_base}/spin/status", uw_h)
-                        if spi_after and isinstance(spi_after, dict):
-                            uw_usdt = float(spi_after.get("walletCoinBalances", {}).get("USDT", 0) or spi_after.get("coinBalances", {}).get("USDT", 0) or uw_usdt)
-                        spins = ((spi_after.get("tickets", 0) or 0) + (spi_after.get("freeSpinsRemaining", 0) or 0)) if (spi_after and isinstance(spi_after, dict)) else ((spi.get("tickets", 0) or 0) + (spi.get("freeSpinsRemaining", 0) or 0))
-                        for _ in range(min(spins, 5)):
-                            await jitter(1.2, 2.5)
-                            await safe_post(f"{uw_base}/spin/play", {}, uw_h)
-                except Exception:
-                    pass
-
-                # Tasks with dwell timers (complete all available tasks with 15s delay)
-                try:
-                    _, utd = await safe_get(f"{uw_base}/tasks", uw_h)
-                    if utd and isinstance(utd, dict):
-                        verify_delay = float(utd.get("verifyDelaySeconds", 15) or 15)
-                        for t in utd.get("tasks", []):
-                            if not t.get("completed") and t.get("id"):
-                                async def _uw_complete_task(task_id, delay_s):
-                                    await asyncio.sleep(delay_s)
-                                    await safe_post(f"{uw_base}/tasks/complete", {"taskId": task_id}, uw_h)
-                                bg_tasks.append(asyncio.create_task(_uw_complete_task(t["id"], verify_delay + random.uniform(1.0, 3.0))))
-                except Exception:
-                    pass
-
-                # Rewards Center Ads (Watch up to 3 ads with 16-24s intervals in background)
-                async def _uw_watch_ads():
-                    try:
-                        _, rcr = await safe_get(f"{uw_base}/rewardsCenter", uw_h)
-                        if rcr and isinstance(rcr, dict):
-                            cards = rcr.get("cards", [])
-                            ads_watched = 0
-                            for c in cards:
-                                cid = c.get("id")
-                                while not c.get("capped") and (c.get("dailyLimit", 0) == 0 or (c.get("watchedToday", 0) < c.get("dailyLimit", 0))) and ads_watched < 3:
-                                    _, war = await safe_post(f"{uw_base}/rewardsCenter/watchAd", {"networkId": cid}, uw_h)
-                                    if war and war.get("ok"):
-                                        ads_watched += 1
-                                        c["watchedToday"] = (c.get("watchedToday", 0) or 0) + 1
-                                    else:
-                                        break
-                                    await asyncio.sleep(random.uniform(16.0, 24.0))
-                                if ads_watched >= 3:
-                                    break
-                    except Exception:
-                        pass
-                bg_tasks.append(asyncio.create_task(_uw_watch_ads()))
-
-                # Gift Box
-                try:
-                    _, gbd = await safe_get(f"{uw_base}/giftBox", uw_h)
-                    if gbd and gbd.get("enabled") and gbd.get("canOpen"):
-                        await jitter(1.2, 2.2)
-                        await safe_post(f"{uw_base}/giftBox/claim", {}, uw_h)
-                except Exception:
-                    pass
-
-                if is_owner:
-                    await safe_post(f"{uw_base}/referral/milestones/claim", {}, uw_h)
-
-                bal_str = ""
-                if uw_usdt > 0 or pend_lt > 0:
-                    bal_str = f" (bal: ${uw_usdt:.2f} USDT, pend: {pend_lt:.1f} LT)"
-                status["bots"]["ultrawallet"] = f"farmed{bal_str}"
-            else:
-                err_data = ud.get("error") if (ud and isinstance(ud, dict)) else None
-                if isinstance(err_data, str):
-                    err_msg = err_data
-                elif isinstance(err_data, dict):
-                    err_msg = err_data.get("message") or err_data.get("error") or "session verification failed"
-                else:
-                    err_msg = "session verification failed"
-                status["bots"]["ultrawallet"] = f"auth_failed: {err_msg}"
-        except Exception as e:
-            status["bots"]["ultrawallet"] = f"error: {format_error(e)}"
 
 
     # 7. ATF Miner
@@ -4171,63 +3608,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
         except Exception as e:
             status["bots"]["atf"] = f"error: {format_error(e)}"
 
-    # 13. FINVORA Web3 (@FINVORAWeb3bot)
-    async def _farm_finvora():
-        fin_init = tokens.get("finvora_init_data")
-        if fin_init:
-            try:
-                fin_h = {
-                    "Content-Type": "application/json",
-                    "X-Telegram-Init-Data": fin_init,
-                    "User-Agent": user_agent,
-                    "Referer": "https://finvora-production.up.railway.app/"
-                }
-                # 1. Connect dedicated TON wallet if not yet linked
-                target_ton = (acc.get("ton_wallet") or {}).get("address")
-                if not target_ton:
-                    _, ton_cache = await load_fleet_wallets_from_cloud()
-                    if ton_cache:
-                        raw_w = ton_cache.get(str(uid)) or ton_cache.get(uid)
-                        target_ton = raw_w.get("address") if isinstance(raw_w, dict) else raw_w
-                if target_ton:
-                    await safe_post("https://finvora-production.up.railway.app/api/wallet/connect", {"address": target_ton, "walletType": "manual"}, fin_h)
 
-                # 2. Get user profile & balances
-                st_me, me_d = await safe_get("https://finvora-production.up.railway.app/api/me", fin_h)
-                if st_me == 401 or (me_d and "unauthorized" in json.dumps(me_d).lower()):
-                    status["bots"]["finvora"] = "token_expired (needs 24h refresh)"
-                    return
-
-                u_obj = me_d.get("user", {}) if isinstance(me_d, dict) else {}
-
-                # 3. Channel Verification Side Task (validates Telegram sponsor channels and awards bonus)
-                await safe_post("https://finvora-production.up.railway.app/api/channels/verify", {}, fin_h)
-
-                # 4. Instant Bonus if not yet claimed
-                if not u_obj.get("hasClaimedInstantBonus"):
-                    await safe_post("https://finvora-production.up.railway.app/api/bonus/instant", {}, fin_h)
-
-                # 5. Claim regular mining if threshold reached (minClaimGram = 0.05)
-                claimable = float(u_obj.get("claimableMined", 0) or 0)
-                bal_txt = ""
-                if claimable >= 0.05:
-                    st_c, cl_d = await safe_post("https://finvora-production.up.railway.app/api/mining/claim", {}, fin_h)
-                    if cl_d and isinstance(cl_d, dict) and cl_d.get("claimed"):
-                        bal_txt = f" (+{cl_d.get('claimed'):.4f} GRAM)"
-                else:
-                    bal_txt = f" (claimable: {claimable:.4f} GRAM)"
-
-                withdrawable = u_obj.get("withdrawableBalance")
-                if withdrawable is not None:
-                    bal_txt += f" [avail: {float(withdrawable):.4f} GRAM]"
-
-                status["bots"]["finvora"] = f"farmed{bal_txt}"
-                return
-            except Exception as e:
-                status["bots"]["finvora"] = f"api_error: {format_error(e)}"
-                return
-
-        status["bots"]["finvora"] = "skipped (no initData)"
 
     # 8. Victor's Company (@VictorsCompanybot)
     async def _farm_victors():
@@ -4417,14 +3798,11 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
         status["bots"]["vyro"] = "skipped (no initData)"
 
-    # Humanized Concurrent Execution Pipeline: 4 bots per account session (9 Active Legitimate Bots)
+    # Humanized Concurrent Execution Pipeline: 3 bots per account session (5 Active Legitimate Bots)
     bot_routines = [
         {"name": "stones", "fn": _farm_stones, "has_data": bool(tokens.get("stones_init_data"))},
         {"name": "mrg", "fn": _farm_mrg, "has_data": bool(tokens.get("mrg_init_data"))},
-        {"name": "ailab", "fn": _farm_ailab, "has_data": bool(tokens.get("ailab_init_data"))},
-        {"name": "ultrawallet", "fn": _farm_ultra, "has_data": bool(tokens.get("ultrawallet_init_data"))},
         {"name": "atf", "fn": _farm_atf, "has_data": bool(tokens.get("atf_init_data"))},
-        {"name": "finvora", "fn": _farm_finvora, "has_data": bool(tokens.get("finvora_init_data"))},
         {"name": "victors", "fn": _farm_victors, "has_data": bool(tokens.get("victors_init_data"))},
         {"name": "vyro", "fn": _farm_vyro, "has_data": bool(tokens.get("vyro_init_data"))},
     ]
@@ -4616,7 +3994,9 @@ async def inspect_referrals_master(request: Request):
     sess_str = master_acc.get("session_string") or master_acc.get("session")
     cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
     bots_to_query = [
-        ("finvora", "FINVORAWeb3bot", ["/referral", "/start", "/balance"])
+        ("stones", "stoneswithestand_bot", ["/start"]),
+        ("mrg", "mrgminerbot", ["/start"]),
+        ("atf", "ATF_AIRDROP_bot", ["/start"])
     ]
     results = {}
     try:
@@ -4672,7 +4052,6 @@ async def study_bot_deep(cl: TelegramClient, bot_key: str, bot_username: str) ->
         "error": None
     }
     channel_deps = {
-        "finvora": ["finvoraweb3"],
         "victors": ["VictorsCompany"],
         "vyro": ["vyrodrop"]
     }
@@ -4957,7 +4336,7 @@ async def study_bot_deep(cl: TelegramClient, bot_key: str, bot_username: str) ->
 async def study_bot_endpoint(bot_key: str, request: Request):
     """
     Studies one or all bots in depth using specified account (?uid=) or active authorized worker account.
-    bot_key can be: stones, mrg, ailab, ultrawallet, atf, finvora, victors, vyro, or all.
+    bot_key can be: stones, mrg, atf, victors, vyro, or all.
     """
     auth = request.headers.get("Authorization") or ""
     req_secret = request.query_params.get("secret", "")
@@ -4973,10 +4352,7 @@ async def study_bot_endpoint(bot_key: str, request: Request):
     bot_map = {
         "stones": "stoneswithestand_bot",
         "mrg": "mrgminerbot",
-        "ailab": "AiLab_robot",
-        "ultrawallet": "UltrawalletTrade_Bot",
         "atf": "ATF_AIRDROP_bot",
-        "finvora": "FINVORAWeb3bot",
         "victors": "VictorsCompanybot",
         "vyro": "vyrodrop_bot"
     }
@@ -5100,10 +4476,7 @@ async def inspect_bot_chat(uid: str, request: Request):
     bots_to_check = [
         ("stones", "stoneswithestand_bot"),
         ("mrg", "mrgminerbot"),
-        ("ailab", "AiLab_robot"),
-        ("ultrawallet", "UltrawalletTrade_Bot"),
         ("atf", "ATF_AIRDROP_bot"),
-        ("finvora", "FINVORAWeb3bot"),
         ("victors", "VictorsCompanybot"),
         ("vyro", "vyrodrop_bot")
     ]
@@ -5156,11 +4529,6 @@ CHANNEL_WHITELIST = {
     "mrgfun",
     "mrgwithdrawal",
     "DurovKidney",
-    "ailabrobotnews",
-    "ultrawallet",
-    "ultrawalletofficial",
-    "gramworkers",
-    "finvoraweb3",
     "VictorsCompany",
     "victors_company",
     "VICWithdrawals",
@@ -5169,28 +4537,27 @@ CHANNEL_WHITELIST = {
     "atfminers"
 }
 
-# Active Legitimate Sponsor Channels (Scammers, TRX Power & ART purged)
+# Active Legitimate Sponsor Channels (Scammers, TRX Power, ART, AI Lab, UltraWallet & FINVORA purged)
 MANDATORY_SPONSOR_CHANNELS = [
-    "finvoraweb3",
     "stoneswithestand",
     "mrgminer", "mrgfun", "mrgwithdrawal", "DurovKidney",
-    "ailabrobotnews",
-    "ultrawalletofficial",
     "VictorsCompany", "victors_company", "VICWithdrawals", "TheBoss_Victor",
     "vyrodrop",
     "atfminers"
 ]
 
-# 7 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
+# 5 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
 FLEET_LEGITIMATE_BOTS = [
-    "stoneswithestand_bot", "mrgminerbot", "AiLab_robot",
-    "UltrawalletTrade_Bot", "ATF_AIRDROP_bot",
-    "FINVORAWeb3bot", "VictorsCompanybot", "vyrodrop_bot"
+    "stoneswithestand_bot", "mrgminerbot", "ATF_AIRDROP_bot",
+    "VictorsCompanybot", "vyrodrop_bot"
 ]
 
 # Blacklisted & Purged Bots to permanently block and delete from Telegram dialogs
 FLEET_BANNED_SCAMMERS = [
-    # Newly purged per user directive
+    # Purged per user directive
+    "AiLab_robot",
+    "UltrawalletTrade_Bot",
+    "FINVORAWeb3bot",
     "TurboGramV1_bot",
     "trxpowermining_bot",
     "BitcoinCloudMinersBot",
@@ -5506,7 +4873,7 @@ async def onboard_new_bots(request: Request):
                 # Onboard and bind master referrals across the 7 legitimate fleet bots
                 try:
                     await bind_account_master_referrals(cl, acc)
-                    for b_name in ["stones", "mrg", "ailab", "ultrawallet", "atf", "finvora", "victors", "vyro"]:
+                    for b_name in ["stones", "mrg", "atf", "victors", "vyro"]:
                         acc_res["bots"][b_name] = "verified" if acc.get(f"{b_name}_referral_bound") else "pending"
                 except Exception as e:
                     acc_res["error"] = str(e)
