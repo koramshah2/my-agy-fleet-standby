@@ -4220,9 +4220,19 @@ async def inspect_bot_chat(uid: str, request: Request):
     ]
     chats = {}
     try:
-        await cl.connect()
-        if not await cl.is_user_authorized():
-            return {"ok": False, "error": "Account session not authorized"}
+        try:
+            await cl.connect()
+        except Exception as conn_err:
+            import traceback
+            return {"ok": False, "uid": uid, "error": f"Connection error: {type(conn_err).__name__}: {conn_err}", "traceback": traceback.format_exc()}
+
+        try:
+            is_auth = await cl.is_user_authorized()
+            if not is_auth:
+                return {"ok": False, "uid": uid, "error": "Account session not authorized in Telegram"}
+        except Exception as auth_err:
+            import traceback
+            return {"ok": False, "uid": uid, "error": f"Auth check error: {type(auth_err).__name__}: {auth_err}", "traceback": traceback.format_exc()}
 
         for name, b_user in bots_to_check:
             try:
@@ -4253,10 +4263,72 @@ async def inspect_bot_chat(uid: str, request: Request):
                 chats[name] = msg_list
             except Exception as ex:
                 chats[name] = [{"error": str(ex)}]
+    except Exception as e:
+        import traceback
+        return {"ok": False, "uid": uid, "error": f"{type(e).__name__}: {str(e)}", "traceback": traceback.format_exc()}
     finally:
-        await cl.disconnect()
+        try:
+            await cl.disconnect()
+        except Exception:
+            pass
 
     return {"ok": True, "uid": uid, "chats": chats}
+
+
+@app.get("/api/debug-account-session/{uid}")
+async def debug_account_session(uid: str, request: Request):
+    """Deep diagnostics for an account session: tests connect, auth, and token extraction."""
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    accounts = await fetch_accounts_from_cloud()
+    target_acc = next((a for a in accounts if str(a.get("user_id")) == str(uid)), None)
+    if not target_acc:
+        return {"ok": False, "error": f"Account {uid} not found in cloud accounts"}
+
+    sess_str = target_acc.get("session_string") or target_acc.get("session")
+    if not sess_str:
+        return {"ok": False, "error": f"Account {uid} has no session string"}
+
+    results = {"uid": uid, "name": target_acc.get("name"), "steps": {}}
+    cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+    try:
+        results["steps"]["connecting"] = "started"
+        await cl.connect()
+        results["steps"]["connecting"] = "connected"
+
+        results["steps"]["authorizing"] = "checking"
+        is_auth = await cl.is_user_authorized()
+        results["steps"]["authorizing"] = is_auth
+        if not is_auth:
+            return {"ok": False, "results": results, "error": "Session is NOT authorized (may have expired or logged out)"}
+
+        me = await cl.get_me()
+        results["me"] = {"id": me.id, "first_name": me.first_name, "username": me.username, "phone": me.phone}
+
+        # Try extracting tokens for all 4 bots
+        extracted = await extract_tokens_with_client(cl, target_acc)
+        results["extracted_tokens"] = {k: (v[:30] + "..." if isinstance(v, str) and len(v) > 30 else v) for k, v in extracted.items()}
+        
+        # If tokens extracted, sync to Upstash Redis
+        if extracted:
+            await sync_account_tokens_to_clouds(extracted)
+            results["synced_to_cloud"] = True
+
+        return {"ok": True, "results": results}
+    except Exception as e:
+        import traceback
+        results["exception"] = f"{type(e).__name__}: {str(e)}"
+        results["traceback"] = traceback.format_exc()
+        return {"ok": False, "results": results, "error": str(e)}
+    finally:
+        try:
+            await cl.disconnect()
+        except Exception:
+            pass
+
 
 
 # Type B Channel & Subscription Engine Definitions
