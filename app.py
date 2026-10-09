@@ -3310,9 +3310,12 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
             bal_str = ""
             if log_data and isinstance(log_data, dict):
-                u_obj = log_data.get("user", {})
-                lvl = u_obj.get("miner_level", 1)
-                bal = float(u_obj.get("mined_balance", 0) or 0)
+                u_obj = log_data.get("user") if isinstance(log_data.get("user"), dict) else log_data
+                lvl = u_obj.get("miner_level") or log_data.get("miner_level") or 1
+                try:
+                    bal = float(u_obj.get("mined_balance") or log_data.get("mined_balance") or 0)
+                except (ValueError, TypeError):
+                    bal = 0.0
                 bal_str = f" (lvl: {lvl}, bal: {bal:.1f} ATF)"
             status["bots"]["atf"] = f"farmed{bal_str}"
         except Exception as e:
