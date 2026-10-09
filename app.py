@@ -479,9 +479,27 @@ async def extract_tokens_for_account(acc: dict) -> dict:
 
     client = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
     try:
-        await client.connect()
-        if not await client.is_user_authorized():
-            logger.warning(f"[{name}] Session unauthorized")
+        connected = False
+        for attempt in range(1, 4):
+            try:
+                await client.connect()
+                if await client.is_user_authorized():
+                    connected = True
+                    break
+                else:
+                    logger.warning(f"[{name}] Session unauthorized")
+                    return {}
+            except Exception as conn_err:
+                err_str = str(conn_err)
+                if "used under two different IP addresses" in err_str or "AUTH_KEY_DUPLICATED" in err_str:
+                    logger.warning(f"[{name}] MTProto session duplicated/revoked")
+                    return {}
+                if attempt < 3:
+                    await asyncio.sleep(attempt * 2.0)
+                else:
+                    logger.error(f"[{name}] Connection error after 3 attempts: {conn_err}")
+                    return {}
+        if not connected:
             return {}
 
         return await extract_tokens_with_client(client, acc)
