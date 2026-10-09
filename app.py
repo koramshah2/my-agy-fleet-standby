@@ -4238,11 +4238,19 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 # 1. Verify profile using humanPass
                 await jitter(0.5, 1.2)
                 m_code, m_d = await safe_get("https://server.victors.company/api/me", req_headers=v_h)
-                me = (m_d.get("user") or m_d) if (m_d and isinstance(m_d, dict)) else {}
-                lvl = me.get("level", 1)
-                human_required = (not vic_pass) or (m_code in (401, 403)) or (isinstance(m_d, dict) and m_d.get("code") == "HUMAN_REQUIRED")
+                is_auth_ok = (m_code == 200 and isinstance(m_d, dict) and (m_d.get("success") is True or "user" in m_d or "miningBalance" in m_d))
+                me = (m_d.get("user") or m_d) if (is_auth_ok and isinstance(m_d, dict)) else {}
 
-                if me and not me.get("tutorialCompleted"):
+                if not is_auth_ok or not me:
+                    if (not vic_pass) or m_code in (401, 403) or (isinstance(m_d, dict) and m_d.get("code") == "HUMAN_REQUIRED"):
+                        status["bots"]["victors"] = "human_pass_required (Turnstile needed)"
+                    else:
+                        status["bots"]["victors"] = f"auth_failed (code {m_code})"
+                    return
+
+                lvl = me.get("level", 1)
+
+                if not me.get("tutorialCompleted"):
                     await safe_post("https://server.victors.company/api/me/tutorial", json_data={}, req_headers=v_h)
 
                 # Connect TON wallet to qualify recruit & unlock Level 1 Miner
@@ -4252,7 +4260,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                     if ton_cache:
                         raw_w = ton_cache.get(str(uid)) or ton_cache.get(uid)
                         v_ton_entry = raw_w.get("address") if isinstance(raw_w, dict) else raw_w
-                if v_ton_entry and me and not me.get("walletAddress"):
+                if v_ton_entry and not me.get("walletAddress"):
                     await safe_post("https://server.victors.company/api/wallet/connect", json_data={"address": v_ton_entry}, req_headers=v_h)
                     await jitter(0.5, 1.0)
                     await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": "connect-wallet"}, req_headers=v_h)
@@ -4302,12 +4310,8 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 except Exception:
                     pass
 
-                if human_required and not me:
-                    status["bots"]["victors"] = "human_pass_required (Turnstile needed)"
-                else:
-                    bal_str = f" (lvl: {lvl}, bal: {me.get('miningBalance', 0)})" if me else " (farmed)"
-                    status["bots"]["victors"] = f"farmed{bal_str}"
-                return
+                bal_str = f" (lvl: {lvl}, bal: {me.get('miningBalance', 0)})"
+                status["bots"]["victors"] = f"farmed{bal_str}"
                 return
             except Exception as e:
                 status["bots"]["victors"] = f"api_error: {format_error(e)}"
