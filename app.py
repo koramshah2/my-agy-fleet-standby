@@ -112,54 +112,6 @@ async def get_gemini_keys() -> list:
             pass
     return CACHED_GEMINI_KEYS
 
-async def solve_stones_captcha_ai(session: aiohttp.ClientSession, img_base64: str, length: int = 5) -> str:
-    """Solves Stones Miner captcha using rotating Gemini Vision models."""
-    if not img_base64:
-        return ""
-    if "," in img_base64:
-        img_base64 = img_base64.split(",")[-1]
-
-    keys = await get_gemini_keys()
-    if not keys:
-        return ""
-
-    prompt = (
-        f"Look at this captcha image carefully. It contains exactly {length} alphanumeric characters "
-        "(letters and numbers). Return ONLY the {length} characters in uppercase, strictly no spaces, no punctuation, no explanations."
-    )
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": "image/png", "data": img_base64}}
-            ]
-        }]
-    }
-    models = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"]
-    import random
-    shuffled_keys = list(keys)
-    random.shuffle(shuffled_keys)
-
-    for model in models:
-        for k in shuffled_keys[:4]:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            headers = {"Content-Type": "application/json", "X-goog-api-key": k}
-            try:
-                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as gr:
-                    if gr.status == 200:
-                        gdata = await gr.json()
-                        candidates = gdata.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts:
-                                raw_text = parts[0].get("text", "")
-                                clean = re.sub(r"[^a-zA-Z0-9]", "", raw_text).upper().strip()
-                                if len(clean) == length:
-                                    return clean
-            except Exception:
-                continue
-    return ""
-
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 }
@@ -194,9 +146,7 @@ def solve_atf_math(question_text: str) -> str:
             return str(nums[0] // nums[1])
     return "0"
 
-# 5 Active Legitimate Fleet Bots (100% Cloud REST Mini-Apps)
-STONES_BOT = "stoneswithestand_bot"
-STONES_REFERRAL_CODE = "r6727787768"
+# 4 Active Legitimate Fleet Bots (100% Cloud REST Mini-Apps)
 MRG_BOT = "mrgminerbot"
 MRG_REFERRAL_CODE = "ref_IRN1G3XD"
 ATF_BOT = "ATF_AIRDROP_bot"
@@ -262,9 +212,9 @@ def is_token_data_expired(t_dict: dict, max_age_hours: float = 20.0) -> bool:
     except Exception:
         return True
 
-    # Check individual token auth_date signatures (5 Legitimate WebApp Bots)
+    # Check individual token auth_date signatures (4 Legitimate WebApp Bots)
     key_tokens = [
-        "stones_init_data", "mrg_init_data", "atf_init_data",
+        "mrg_init_data", "atf_init_data",
         "victors_init_data", "vyro_init_data"
     ]
     missing_cnt = 0
@@ -467,12 +417,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
 
     is_master = (uid == str(REPORT_CHAT_ID) or uid == "6727787768")
 
-    # 1. Stones Miners (@stoneswithestand_bot)
-    tok = await extract_bot_webapp_token(client, STONES_BOT, default_url="https://app.stoneswithestand.my.id/", candidate_short_names=["app", "miniapp"])
-    if tok:
-        tokens["stones_init_data"] = tok
-
-    # 2. MRG Miner (@mrgminerbot)
+    # 1. MRG Miner (@mrgminerbot)
     mrg_param = None if is_master else MRG_REFERRAL_CODE
     tok = await extract_bot_webapp_token(client, MRG_BOT, start_param=mrg_param, default_url="https://app.mrgtoken.xyz/", candidate_short_names=["app", "miniapp"])
     if tok:
@@ -480,7 +425,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
 
 
 
-    # 8. Victor's Company (@VictorsCompanybot)
+    # 2. Victor's Company (@VictorsCompanybot)
     v_param = None if is_master else VICTORS_REFERRAL_CODE
     try:
         b_vic = await client.get_entity(VICTORS_BOT)
@@ -494,7 +439,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     if tok:
         tokens["victors_init_data"] = tok
 
-    # 9. VyroDrop (@vyrodrop_bot)
+    # 3. VyroDrop (@vyrodrop_bot)
     vy_param = None if is_master else VYRO_REFERRAL_CODE
     try:
         b_vy = await client.get_entity(VYRO_BOT)
@@ -509,7 +454,7 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
         tokens["vyro_init_data"] = tok
 
     # Auto-join mandatory sponsor channels so side-task verifications succeed across all bots
-    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "stoneswithestand", "VictorsCompany", "vyrodrop"]:
+    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "VictorsCompany", "vyrodrop"]:
         try:
             await client(JoinChannelRequest(s_ch))
             await asyncio.sleep(0.3)
@@ -1157,7 +1102,7 @@ async def token_health_and_refresh_watchdog():
                                 except Exception:
                                     synced_ts = 0
                         # If token missing or older than 18 hours (64800s), flag for refresh
-                        if not tok or (now - synced_ts > 64800) or not tok.get("stones_init_data"):
+                        if not tok or (now - synced_ts > 64800) or not tok.get("mrg_init_data"):
                             stale_or_missing_accs.append(acc)
 
                     if stale_or_missing_accs:
@@ -1263,62 +1208,22 @@ async def sync_account_tokens_to_clouds(tokens: dict):
 async def bootstrap_account_mining(acc_entry: dict, tokens: dict):
     """
     Kicks off initial WebApp mining, completes referral onboarding finish work,
-    and runs first-cycle claims across all 5 legitimate bots:
-    1. Stones Miners (/api/mining/start, /api/claim, dynamic tasks, stone breaker, boost)
-    2. MRG Miner (/api/user/claim-mining, /api/user/claim-task, referral commission)
-    3. ATF Miner (login, math challenge -> /start_mine, speed boost, tasks, referral claim)
-    4. Victor's Company (/api/users/profile, /api/tasks, deep mining)
-    5. VyroDrop (/api/user, /api/task, ton wallet link)
+    and runs first-cycle claims across all 4 legitimate bots:
+    1. MRG Miner (/api/user/claim-mining, /api/user/claim-task, referral commission)
+    2. ATF Miner (login, math challenge -> /start_mine, speed boost, tasks, referral claim)
+    3. Victor's Company (/api/users/profile, /api/tasks, deep mining)
+    4. VyroDrop (/api/user, /api/task, ton wallet link)
     """
     uid = str(acc_entry.get("user_id"))
     name = acc_entry.get("name", "User")
-    logger.info(f"[{name}] ⚡ Bootstrapping initial cloud mining & completing referral finish work across all 5 legitimate bots...")
+    logger.info(f"[{name}] ⚡ Bootstrapping initial cloud mining & completing referral finish work across all 4 legitimate bots...")
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 Telegram-Android/11.0.0"
     }
 
     async with aiohttp.ClientSession(headers=headers) as http:
-        # 1. Stones Miners
-        if tokens.get("stones_init_data"):
-            try:
-                s_init = tokens["stones_init_data"]
-                target_evm = (acc_entry.get("evm_wallet") or {}).get("address") or acc_entry.get("bnb_wallet")
-                if target_evm:
-                    await http.post("https://app.stoneswithestand.my.id/api/wallet", json={"initData": s_init, "wallet": target_evm}, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://app.stoneswithestand.my.id/api/mining/start", json={"initData": s_init}, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://app.stoneswithestand.my.id/api/claim", json={"initData": s_init}, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://app.stoneswithestand.my.id/api/task/complete", json={"initData": s_init, "slug": "daily_checkin"}, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://app.stoneswithestand.my.id/api/task/start", json={"initData": s_init, "slug": "join_channel"}, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://app.stoneswithestand.my.id/api/task/complete", json={"initData": s_init, "slug": "join_channel"}, timeout=aiohttp.ClientTimeout(total=8))
-                await http.post("https://app.stoneswithestand.my.id/api/task/verify", json={"initData": s_init, "slug": "join_channel"}, timeout=aiohttp.ClientTimeout(total=8))
-                try:
-                    async with http.post("https://app.stoneswithestand.my.id/api/state", json={"initData": s_init}, timeout=aiohttp.ClientTimeout(total=6)) as st_r:
-                        if st_r.status == 200:
-                            st_data = await st_r.json()
-                            raw_tasks = st_data.get("tasks", {})
-                            tasks_to_do = []
-                            if isinstance(raw_tasks, dict):
-                                for slug, status in raw_tasks.items():
-                                    if status != "completed":
-                                        tasks_to_do.append(slug)
-                            elif isinstance(raw_tasks, list):
-                                for t in raw_tasks:
-                                    slug = t.get("slug") or t.get("id")
-                                    if slug and not t.get("completed") and not t.get("is_completed"):
-                                        tasks_to_do.append(slug)
-                            for slug in tasks_to_do:
-                                if slug not in ["daily_checkin", "join_channel"]:
-                                    await http.post("https://app.stoneswithestand.my.id/api/task/start", json={"initData": s_init, "slug": slug}, timeout=aiohttp.ClientTimeout(total=4))
-                                    await http.post("https://app.stoneswithestand.my.id/api/task/complete", json={"initData": s_init, "slug": slug}, timeout=aiohttp.ClientTimeout(total=4))
-                                    await http.post("https://app.stoneswithestand.my.id/api/task/verify", json={"initData": s_init, "slug": slug}, timeout=aiohttp.ClientTimeout(total=4))
-                except Exception:
-                    pass
-                logger.info(f"[{name}] ✅ Stones initial mining started & tasks completed")
-            except Exception as e:
-                logger.debug(f"[{name}] Stones bootstrap note: {e}")
-
-        # 2. MRG Miner
+        # 1. MRG Miner
         if tokens.get("mrg_init_data"):
             try:
                 m_init = tokens["mrg_init_data"]
@@ -1427,12 +1332,11 @@ async def bootstrap_account_mining(acc_entry: dict, tokens: dict):
             except Exception as e:
                 logger.debug(f"[{name}] ATF Miner bootstrap note: {e}")
 def is_account_referrals_bound(acc_entry: dict) -> bool:
-    """Checks whether an account already has its master referrals bound across all 5 active legitimate bots."""
-    if acc_entry.get("all_5_referrals_bound") or acc_entry.get("all_9_referrals_bound"):
+    """Checks whether an account already has its master referrals bound across all 4 active legitimate bots."""
+    if acc_entry.get("all_4_referrals_bound") or acc_entry.get("all_5_referrals_bound") or acc_entry.get("all_9_referrals_bound"):
         return True
     return bool(
         acc_entry.get("atf_referral_bound") and
-        acc_entry.get("stones_referral_bound") and
         acc_entry.get("mrg_referral_bound") and
         acc_entry.get("victors_referral_bound") and
         acc_entry.get("vyro_referral_bound")
@@ -1691,12 +1595,11 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
     """
     Guarantees master referral codes are registered ONCE per account for 1st-time newly added accounts,
     extracts WebApp session tokens, syncs to 5x Cloudflare KV + Upstash,
-    and executes referral finish work across all 5 legitimate bots:
-    1. Stones: r6727787768
-    2. MRG: ref_IRN1G3XD
-    3. ATF Miner: 6727787768
-    4. Victor's Company: ref_A20AA96F18
-    5. VyroDrop: ref_myFjrqqE4WN_
+    and executes referral finish work across all 4 legitimate bots:
+    1. MRG: ref_IRN1G3XD
+    2. ATF Miner: 6727787768
+    3. Victor's Company: ref_A20AA96F18
+    4. VyroDrop: ref_myFjrqqE4WN_
     """
     name = acc_entry.get("name", "User")
     uid = acc_entry.get("user_id")
@@ -1715,23 +1618,9 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
             await sync_account_tokens_to_clouds(tokens)
         return
 
-    logger.info(f"[{name}] 🚀 Initiating 1st-time 7-bot master referral binding (Master ID: 6727787768)...")
+    logger.info(f"[{name}] 🚀 Initiating 1st-time 4-bot master referral binding (Master ID: 6727787768)...")
 
-    # 1. Stones Miner
-    if not acc_entry.get("stones_referral_bound"):
-        try:
-            b_stones = await client.get_entity(STONES_BOT)
-            await client.send_message(b_stones, "/start r6727787768")
-            try:
-                await client(JoinChannelRequest("stoneswithestand"))
-            except Exception:
-                pass
-            acc_entry["stones_referral_bound"] = True
-            await asyncio.sleep(0.8)
-        except Exception as e:
-            logger.warning(f"[{name}] Stones referral bind note: {e}")
-
-    # 2. MRG Miner (Strict WebApp initData + API Auth Verify Handshake)
+    # 1. MRG Miner (Strict WebApp initData + API Auth Verify Handshake)
     if not acc_entry.get("mrg_referral_bound"):
         try:
             b_mrg = await client.get_entity(MRG_BOT)
@@ -1763,7 +1652,7 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
             logger.warning(f"[{name}] MRG referral bind note: {e}")
 
 
-    # 3. ATF Miner
+    # 2. ATF Miner
     if not acc_entry.get("atf_referral_bound"):
         try:
             b_atf = await client.get_entity("ATF_AIRDROP_bot")
@@ -1773,7 +1662,7 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
         except Exception as e:
             logger.warning(f"[{name}] ATF referral bind note: {e}")
 
-    # 4. Victor's Company (@VictorsCompanybot)
+    # 3. Victor's Company (@VictorsCompanybot)
     if not acc_entry.get("victors_referral_bound"):
         try:
             b_vic = await client.get_entity(VICTORS_BOT)
@@ -1783,7 +1672,7 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
         except Exception as e:
             logger.warning(f"[{name}] Victor's Company referral bind note: {e}")
 
-    # 9. VyroDrop (@vyrodrop_bot)
+    # 4. VyroDrop (@vyrodrop_bot)
     if not acc_entry.get("vyro_referral_bound"):
         try:
             b_vy = await client.get_entity(VYRO_BOT)
@@ -1795,8 +1684,9 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
 
     if is_account_referrals_bound(acc_entry):
         acc_entry["referrals_bound"] = True
+        acc_entry["all_4_referrals_bound"] = True
         acc_entry["all_9_referrals_bound"] = True
-        logger.info(f"[{name}] ✅ All 9 fleet bots successfully bound to Master ID 6727787768 (1st time only)!")
+        logger.info(f"[{name}] ✅ All 4 fleet bots successfully bound to Master ID 6727787768 (1st time only)!")
     else:
         logger.warning(f"[{name}] ⚠️ Some referrals could not be bound immediately. Will retry on next cycle.")
 
@@ -1819,9 +1709,9 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
     except Exception:
         pass
 
-    # Fallback: if tokens is missing required bot keys, re-extract with fresh standalone client (5 Legitimate WebApp Bots)
+    # Fallback: if tokens is missing required bot keys, re-extract with fresh standalone client (4 Legitimate WebApp Bots)
     req_keys = [
-        "stones_init_data", "mrg_init_data", "atf_init_data",
+        "mrg_init_data", "atf_init_data",
         "victors_init_data", "vyro_init_data"
     ]
     if not tokens or any(not tokens.get(k) for k in req_keys):
@@ -2192,22 +2082,7 @@ async def bind_wallets_to_bots(http_session, acc_entry: dict, tokens: dict):
         except Exception:
             pass
 
-    # 1. Stones Miner EVM Binding
-    if tokens.get("stones_init_data") and target_evm:
-        try:
-            s_init = tokens["stones_init_data"]
-            s_headers = {"Content-Type": "application/json", "Origin": "https://app.stoneswithestand.my.id"}
-            await http_session.post(
-                "https://app.stoneswithestand.my.id/api/wallet",
-                json={"initData": s_init, "wallet": target_evm},
-                headers=s_headers,
-                timeout=aiohttp.ClientTimeout(total=8)
-            )
-            logger.info(f"[{name}] 💎 Bound Stones Miner EVM wallet: {target_evm[:12]}...")
-        except Exception as se:
-            logger.debug(f"[{name}] Stones wallet bind note: {se}")
-
-    # 2. MRG Miner TON Binding
+    # 1. MRG Miner TON Binding
     if tokens.get("mrg_init_data") and target_ton:
         try:
             m_init = tokens["mrg_init_data"]
@@ -2277,11 +2152,10 @@ async def notify_admin_new_account_onboarded(acc_entry: dict):
         f"• <b>Bitcoin:</b> <code>{btc_addr}</code>\n\n"
         f"🔗 <b>Mining Bots Linked:</b>\n"
         f"• ATF Miner: TON Connected ✅\n"
-        f"• Stones Miner: EVM Bound ✅\n"
         f"• MRG Miner: TON Connected ✅\n"
         f"• Victor's Company: Active ✅\n"
         f"• VyroDrop: Active ✅\n\n"
-        f"🚀 <b>Auto-Farming Status:</b> Active across all 5 legitimate bots in the cloud!"
+        f"🚀 <b>Auto-Farming Status:</b> Active across all 4 legitimate bots in the cloud!"
     )
     async with aiohttp.ClientSession() as s:
         try:
@@ -2601,83 +2475,6 @@ async def send_payout_receipt(message: str, dedupe_key: str = None):
 
 
 
-
-
-async def check_and_withdraw_stones(session: aiohttp.ClientSession, acc: dict, tokens: dict) -> dict:
-    """Checks balance and executes automated withdrawal for Stones Miners (Threshold: >= 500 STONES)."""
-    uid = str(acc.get("user_id"))
-    name = acc.get("name", uid)
-    if not ENABLE_AUTO_WITHDRAWALS:
-        return {"uid": uid, "name": name, "status": "disabled_by_policy"}
-    if uid == "6727787768":
-        return {"uid": uid, "name": name, "status": "compounding_mode"}
-
-    init_data = tokens.get(uid, {}).get("stones_init_data")
-    if not init_data:
-        return {"uid": uid, "name": name, "status": "no_init_data"}
-
-    base_url = "https://app.stoneswithestand.my.id"
-    headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro)"}
-    try:
-        async with session.post(f"{base_url}/api/state", json={"initData": init_data}, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as sr:
-            if sr.status != 200:
-                return {"uid": uid, "name": name, "status": "state_check_failed"}
-            sd = await sr.json()
-            user_data = sd.get("user", {})
-            coins = float(user_data.get("coins", 0) or 0)
-            if coins < 500:
-                return {"uid": uid, "name": name, "status": "below_threshold", "coins": coins}
-
-            logger.info(f"[Cloud Stones] {name} ({uid}) threshold reached: {coins:.1f} >= 500. Executing automated withdrawal...")
-
-            # 1. Bind target vault wallet if not bound
-            bound_wallet = user_data.get("wallet", "")
-            target_wallet = acc.get("evm_wallet", {}).get("address") or MASTER_EVM_VAULT
-            if bound_wallet.lower() != target_wallet.lower():
-                try:
-                    await session.post(f"{base_url}/api/wallet", json={"initData": init_data, "wallet": target_wallet}, headers=headers, timeout=aiohttp.ClientTimeout(total=6))
-                except Exception:
-                    pass
-
-            # 2. Issue captcha
-            ticket = None
-            async with session.post(f"{base_url}/api/wd/captcha/issue", json={"initData": init_data}, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as ir:
-                if ir.status == 200:
-                    idat = await ir.json()
-                    if idat.get("enabled") is False:
-                        ticket = None
-                    else:
-                        cid = idat.get("captcha_id")
-                        img = idat.get("image", "")
-                        clen = int(idat.get("length", 5))
-                        if cid and img:
-                            ans = await solve_stones_captcha_ai(session, img, clen)
-                            if ans:
-                                async with session.post(f"{base_url}/api/wd/captcha/verify", json={"initData": init_data, "captcha_id": cid, "answer": ans}, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as vr:
-                                    if vr.status == 200:
-                                        vrd = await vr.json()
-                                        if vrd.get("ok"):
-                                            ticket = vrd.get("ticket")
-
-            # 3. Submit withdrawal
-            wd_payload = {"initData": init_data, "amount": 500, "wallet": target_wallet, "currency": "stones"}
-            if ticket:
-                wd_payload["ticket"] = ticket
-                wd_payload["captcha_ticket"] = ticket
-
-            async with session.post(f"{base_url}/api/withdraw", json=wd_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as wr:
-                if wr.status == 200:
-                    wrd = await wr.json()
-                    if wrd.get("ok"):
-                        logger.info(f"[Cloud Stones] {name} ({uid}) auto-withdrawal submitted: 500 STONES -> {target_wallet}")
-                        return {"uid": uid, "name": name, "status": "withdrawn", "coins": coins, "wallet": target_wallet}
-                    else:
-                        logger.warning(f"[Cloud Stones] {name} withdraw rejected: {wrd.get('info')}")
-                        return {"uid": uid, "name": name, "status": "rejected", "info": wrd.get("info")}
-                return {"uid": uid, "name": name, "status": f"http_{wr.status}"}
-    except Exception as e:
-        logger.warning(f"[Cloud Stones] Error for {name}: {e}")
-        return {"uid": uid, "name": name, "status": "error", "error": str(e)}
 
 
 # =============================================================================
@@ -3182,7 +2979,7 @@ async def fetch_cloud_miniapp_tokens(session: aiohttp.ClientSession) -> dict:
 
 async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, acc_tokens: dict) -> dict:
     """
-    Farms all 5 legitimate active bots (Stones, MRG, ATF, Victor's Company, VyroDrop) for a single account.
+    Farms all 4 legitimate active bots (MRG, ATF, Victor's Company, VyroDrop) for a single account.
     Engineered with:
       - Deterministic mobile device fingerprinting per account (eliminates bot signatures)
       - Realistic human jitter delays
@@ -3248,131 +3045,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
         msg = str(e).strip()
         return f"{type(e).__name__}: {msg}" if msg else type(e).__name__
 
-    # 1. Stones Miners
-    async def _farm_stones():
-        if not tokens.get("stones_init_data"):
-            return
-        try:
-            s_init = tokens["stones_init_data"]
-            s_headers = {
-                **headers,
-                "Origin": "https://app.stoneswithestand.my.id",
-                "Referer": "https://app.stoneswithestand.my.id/"
-            }
-            await jitter(1.0, 2.2)
-            # Daily checkin
-            await safe_post("https://app.stoneswithestand.my.id/api/task/complete", {"initData": s_init, "slug": "daily_checkin"}, req_headers=s_headers)
-
-            # Join channel with realistic dwell time
-            await jitter(1.2, 2.5)
-            await safe_post("https://app.stoneswithestand.my.id/api/task/start", {"initData": s_init, "slug": "join_channel"}, req_headers=s_headers)
-
-            async def _stones_complete_channel():
-                await asyncio.sleep(random.uniform(15.0, 17.0))
-                await safe_post("https://app.stoneswithestand.my.id/api/task/complete", {"initData": s_init, "slug": "join_channel"}, req_headers=s_headers)
-                await asyncio.sleep(random.uniform(1.5, 3.0))
-                await safe_post("https://app.stoneswithestand.my.id/api/task/verify", {"initData": s_init, "slug": "join_channel"}, req_headers=s_headers)
-            bg_tasks.append(asyncio.create_task(_stones_complete_channel()))
-
-            # Dynamic task discovery from /api/state
-            st_data = None
-            try:
-                _, st_data = await safe_post("https://app.stoneswithestand.my.id/api/state", {"initData": s_init}, req_headers=s_headers)
-                if st_data and isinstance(st_data, dict):
-                    raw_tasks = st_data.get("tasks", {})
-                    tasks_to_do = []
-                    if isinstance(raw_tasks, dict):
-                        for slug, tstat in raw_tasks.items():
-                            if tstat != "completed":
-                                tasks_to_do.append(slug)
-                    elif isinstance(raw_tasks, list):
-                        for t in raw_tasks:
-                            slug = t.get("slug") or t.get("id")
-                            if slug and not t.get("completed") and not t.get("is_completed"):
-                                tasks_to_do.append(slug)
-                    for slug in tasks_to_do:
-                        if slug not in ["daily_checkin", "join_channel"]:
-                            await safe_post("https://app.stoneswithestand.my.id/api/task/start", {"initData": s_init, "slug": slug}, req_headers=s_headers)
-                            is_ext = any(k in str(slug).lower() for k in ["sponsor", "channel", "tg", "telegram", "twitter", "youtube", "sub", "follow", "visit"])
-                            if is_ext:
-                                async def _stones_complete_ext(t_slug):
-                                    await asyncio.sleep(random.uniform(14.5, 16.5))
-                                    await safe_post("https://app.stoneswithestand.my.id/api/task/complete", {"initData": s_init, "slug": t_slug}, req_headers=s_headers)
-                                    await asyncio.sleep(random.uniform(1.5, 2.8))
-                                    await safe_post("https://app.stoneswithestand.my.id/api/task/verify", {"initData": s_init, "slug": t_slug}, req_headers=s_headers)
-                                bg_tasks.append(asyncio.create_task(_stones_complete_ext(slug)))
-                            else:
-                                await jitter(2.2, 4.0)
-                                await safe_post("https://app.stoneswithestand.my.id/api/task/complete", {"initData": s_init, "slug": slug}, req_headers=s_headers)
-                                await jitter(1.5, 2.8)
-                                await safe_post("https://app.stoneswithestand.my.id/api/task/verify", {"initData": s_init, "slug": slug}, req_headers=s_headers)
-                            await jitter(1.0, 2.0)
-            except Exception:
-                pass
-
-            # Claim pool & mining start
-            await jitter(1.2, 2.5)
-            await safe_post("https://app.stoneswithestand.my.id/api/claim", {"initData": s_init}, req_headers=s_headers)
-            await jitter(1.0, 2.0)
-            await safe_post("https://app.stoneswithestand.my.id/api/mining/start", {"initData": s_init}, req_headers=s_headers)
-
-            # Stone Breaker Play & Earn (+10 STONES/hr, +100 STONES/day)
-            try:
-                _, sbd = await safe_post("https://app.stoneswithestand.my.id/api/sb/status", {"initData": s_init}, req_headers=s_headers)
-                if sbd and sbd.get("ok") and (sbd.get("hour_got", 0) < sbd.get("hourly_cap", 10)) and (sbd.get("day_got", 0) < sbd.get("daily_cap", 100)):
-                    _, sbsd = await safe_post("https://app.stoneswithestand.my.id/api/sb/start", {"initData": s_init}, req_headers=s_headers)
-                    if sbsd and sbsd.get("ok"):
-                        sess_id = sbsd.get("session", {}).get("session_id")
-                        dur = int(sbsd.get("session", {}).get("duration", 30)) + 1
-                        if sess_id:
-                            async def _stones_finish_game(sid, d):
-                                await asyncio.sleep(d)
-                                sc = random.randint(142, 166)
-                                await safe_post("https://app.stoneswithestand.my.id/api/sb/finish", {"initData": s_init, "session_id": sid, "score": sc}, req_headers=s_headers)
-                            bg_tasks.append(asyncio.create_task(_stones_finish_game(sess_id, dur)))
-            except Exception:
-                pass
-
-            # Mining Boost (+0.5 TH/s)
-            try:
-                _, abcd = await safe_post("https://app.stoneswithestand.my.id/api/ad/boost/challenge", {"initData": s_init}, req_headers=s_headers)
-                if abcd and abcd.get("ok"):
-                    cid = abcd.get("challenge", {}).get("challenge_id")
-                    if cid:
-                        await safe_post("https://app.stoneswithestand.my.id/api/ad/beat", {"initData": s_init, "scope": "boost", "challenge_id": cid}, req_headers=s_headers)
-                        async def _stones_finish_boost(chid):
-                            await asyncio.sleep(16)
-                            await safe_post("https://app.stoneswithestand.my.id/api/ad/beat", {"initData": s_init, "scope": "boost", "challenge_id": chid}, req_headers=s_headers)
-                            await safe_post("https://app.stoneswithestand.my.id/api/ad/boost/reward", {"initData": s_init, "challenge_id": chid}, req_headers=s_headers)
-                        bg_tasks.append(asyncio.create_task(_stones_finish_boost(cid)))
-            except Exception:
-                pass
-
-            # Ensure dedicated EVM wallet is bound
-            try:
-                w_evm = (acc.get("evm_wallet") or {}).get("address") or ("0xfda4182001672b9f0f09e2118242e543e35ed5ce" if is_owner else None)
-                if w_evm:
-                    await safe_post("https://app.stoneswithestand.my.id/api/wallet", {"initData": s_init, "wallet": w_evm}, req_headers=s_headers)
-                # Auto-withdrawal check: DISABLED to prevent wrong-address routing; fleet is in 100% accumulation mode
-                if ENABLE_AUTO_WITHDRAWALS and not is_owner and w_evm:
-                    _, pc = await safe_post("https://app.stoneswithestand.my.id/api/wd/ad/precheck", {"initData": s_init, "amount": 500, "wallet": w_evm, "currency": "stones"}, req_headers=s_headers)
-                    if pc and pc.get("ok") and (not pc.get("need_ad") or (pc.get("boarded", 0) >= pc.get("required", 4))):
-                        await safe_post("https://app.stoneswithestand.my.id/api/withdraw", {"initData": s_init, "amount": 500, "wallet": w_evm, "currency": "stones"}, req_headers=s_headers)
-            except Exception:
-                pass
-
-            bal_str = ""
-            if st_data and isinstance(st_data, dict):
-                st_u = st_data.get("user", {})
-                coins = st_u.get("coins")
-                lvl = st_u.get("level")
-                if coins is not None:
-                    bal_str = f" (lvl: {lvl}, bal: {coins} STONES)" if lvl is not None else f" (bal: {coins} STONES)"
-            status["bots"]["stones"] = f"farmed{bal_str}"
-        except Exception as e:
-            status["bots"]["stones"] = f"error: {format_error(e)}"
-
-    # 2. MRG Miner
+    # 1. MRG Miner
     async def _farm_mrg():
         if not tokens.get("mrg_init_data"):
             return
@@ -3798,9 +3471,8 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
         status["bots"]["vyro"] = "skipped (no initData)"
 
-    # Humanized Concurrent Execution Pipeline: 3 bots per account session (5 Active Legitimate Bots)
+    # Humanized Concurrent Execution Pipeline: 3 bots per account session (4 Active Legitimate Bots)
     bot_routines = [
-        {"name": "stones", "fn": _farm_stones, "has_data": bool(tokens.get("stones_init_data"))},
         {"name": "mrg", "fn": _farm_mrg, "has_data": bool(tokens.get("mrg_init_data"))},
         {"name": "atf", "fn": _farm_atf, "has_data": bool(tokens.get("atf_init_data"))},
         {"name": "victors", "fn": _farm_victors, "has_data": bool(tokens.get("victors_init_data"))},
@@ -3994,7 +3666,6 @@ async def inspect_referrals_master(request: Request):
     sess_str = master_acc.get("session_string") or master_acc.get("session")
     cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
     bots_to_query = [
-        ("stones", "stoneswithestand_bot", ["/start"]),
         ("mrg", "mrgminerbot", ["/start"]),
         ("atf", "ATF_AIRDROP_bot", ["/start"])
     ]
@@ -4336,7 +4007,7 @@ async def study_bot_deep(cl: TelegramClient, bot_key: str, bot_username: str) ->
 async def study_bot_endpoint(bot_key: str, request: Request):
     """
     Studies one or all bots in depth using specified account (?uid=) or active authorized worker account.
-    bot_key can be: stones, mrg, atf, victors, vyro, or all.
+    bot_key can be: mrg, atf, victors, vyro, or all.
     """
     auth = request.headers.get("Authorization") or ""
     req_secret = request.query_params.get("secret", "")
@@ -4350,7 +4021,6 @@ async def study_bot_endpoint(bot_key: str, request: Request):
         target_acc = next((a for a in accounts if str(a.get("user_id")) == str(req_uid)), None)
 
     bot_map = {
-        "stones": "stoneswithestand_bot",
         "mrg": "mrgminerbot",
         "atf": "ATF_AIRDROP_bot",
         "victors": "VictorsCompanybot",
@@ -4474,7 +4144,6 @@ async def inspect_bot_chat(uid: str, request: Request):
     sess_str = target_acc.get("session_string") or target_acc.get("session")
     cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
     bots_to_check = [
-        ("stones", "stoneswithestand_bot"),
         ("mrg", "mrgminerbot"),
         ("atf", "ATF_AIRDROP_bot"),
         ("victors", "VictorsCompanybot"),
@@ -4524,7 +4193,6 @@ async def inspect_bot_chat(uid: str, request: Request):
 # Type B Channel & Subscription Engine Definitions
 CHANNEL_WHITELIST = {
     "myagyai",
-    "stoneswithestand",
     "mrgminer",
     "mrgfun",
     "mrgwithdrawal",
@@ -4537,24 +4205,24 @@ CHANNEL_WHITELIST = {
     "atfminers"
 }
 
-# Active Legitimate Sponsor Channels (Scammers, TRX Power, ART, AI Lab, UltraWallet & FINVORA purged)
+# Active Legitimate Sponsor Channels (Scammers, TRX Power, ART, AI Lab, UltraWallet, FINVORA & Stones purged)
 MANDATORY_SPONSOR_CHANNELS = [
-    "stoneswithestand",
     "mrgminer", "mrgfun", "mrgwithdrawal", "DurovKidney",
     "VictorsCompany", "victors_company", "VICWithdrawals", "TheBoss_Victor",
     "vyrodrop",
     "atfminers"
 ]
 
-# 5 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
+# 4 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
 FLEET_LEGITIMATE_BOTS = [
-    "stoneswithestand_bot", "mrgminerbot", "ATF_AIRDROP_bot",
+    "mrgminerbot", "ATF_AIRDROP_bot",
     "VictorsCompanybot", "vyrodrop_bot"
 ]
 
 # Blacklisted & Purged Bots to permanently block and delete from Telegram dialogs
 FLEET_BANNED_SCAMMERS = [
     # Purged per user directive
+    "stoneswithestand_bot",
     "AiLab_robot",
     "UltrawalletTrade_Bot",
     "FINVORAWeb3bot",
@@ -4580,6 +4248,11 @@ FLEET_BANNED_SCAMMERS = [
 # Channels & Groups to permanently leave and delete from Telegram dialogs
 SCAM_CHANNELS_TO_LEAVE = [
     # Newly purged per user directive
+    "stoneswithestand",
+    "ailabrobotnews",
+    "ultrawalletofficial",
+    "ultrawallet",
+    "finvoraweb3",
     "TurboGramAnnouncements",
     "TurboGramPayment",
     "trxpowerminingofficial",
@@ -4655,7 +4328,8 @@ async def sync_and_verify_channels_endpoint(request: Request):
                 continue
 
             cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
-            acc_res = {"uid": uid, "name": name, "joined": [], "unblocked": [], "blocked_scammers": [], "deleted_dialogs": [], "left_scam_channels": [], "muted": 0, "pruned": 0}
+            already_purged = bool(acc.get("dead_bots_purged_v2"))
+            acc_res = {"uid": uid, "name": name, "joined": [], "unblocked": [], "blocked_scammers": [], "deleted_dialogs": [], "left_scam_channels": [], "muted": 0, "pruned": 0, "already_purged": already_purged}
             try:
                 await asyncio.wait_for(cl.connect(), timeout=10.0)
                 if not await cl.is_user_authorized():
@@ -4664,29 +4338,46 @@ async def sync_and_verify_channels_endpoint(request: Request):
                     LAST_CHANNEL_SYNC_STATUS["results"].append(acc_res)
                     continue
 
-                # 1. Permanently Block and DELETE chat history for all blacklisted bots
-                for sb in FLEET_BANNED_SCAMMERS:
+                # 1-TIME SANITATION: Only block, erase history, and leave discontinued bots once per account
+                if not already_purged:
+                    # 1. Permanently Block and DELETE chat history for all blacklisted bots
+                    for sb in FLEET_BANNED_SCAMMERS:
+                        try:
+                            b_ent = await cl.get_entity(sb)
+                            await cl(functions.contacts.BlockRequest(id=b_ent))
+                            await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
+                            await cl.delete_dialog(b_ent)
+                            acc_res["blocked_scammers"].append(sb)
+                            acc_res["deleted_dialogs"].append(sb)
+                        except Exception:
+                            pass
+
+                    # 2. Leave and DELETE dialogs for all scammer channels
+                    for sc in SCAM_CHANNELS_TO_LEAVE:
+                        try:
+                            ch_ent = await cl.get_entity(sc)
+                            await cl(functions.channels.LeaveChannelRequest(ch_ent))
+                            await cl.delete_dialog(ch_ent)
+                            acc_res["left_scam_channels"].append(sc)
+                        except Exception:
+                            pass
+
+                    acc["dead_bots_purged_v2"] = True
+                    FLEET_ACCOUNTS_CACHE[uid] = acc
+                    if UPSTASH_URL and UPSTASH_TOKEN:
+                        try:
+                            async with aiohttp.ClientSession() as sup:
+                                await sup.post(f"{UPSTASH_URL}/set/fleet:purged_v2:{uid}", data="1", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3))
+                        except Exception:
+                            pass
                     try:
-                        b_ent = await cl.get_entity(sb)
-                        await cl(functions.contacts.BlockRequest(id=b_ent))
-                        await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
-                        await cl.delete_dialog(b_ent)
-                        acc_res["blocked_scammers"].append(sb)
-                        acc_res["deleted_dialogs"].append(sb)
+                        asyncio.create_task(sync_new_account_to_clouds(acc))
                     except Exception:
                         pass
+                else:
+                    logger.info(f"[{name}] Dead bots & scam channels already purged previously. Skipping dialog deletion.")
 
-                # 2. Leave and DELETE dialogs for all scammer channels
-                for sc in SCAM_CHANNELS_TO_LEAVE:
-                    try:
-                        ch_ent = await cl.get_entity(sc)
-                        await cl(functions.channels.LeaveChannelRequest(ch_ent))
-                        await cl.delete_dialog(ch_ent)
-                        acc_res["left_scam_channels"].append(sc)
-                    except Exception:
-                        pass
-
-                # 3. Unblock all 7 legitimate fleet bots
+                # 3. Unblock all 4 legitimate fleet bots
                 for b in FLEET_LEGITIMATE_BOTS:
                     try:
                         await cl(functions.contacts.UnblockRequest(id=b))
@@ -4705,7 +4396,7 @@ async def sync_and_verify_channels_endpoint(request: Request):
                         if "already" in err_s:
                             acc_res["joined"].append(f"{ch} (already)")
 
-                # 5. Scan ALL dialogs: Erase and delete dialogs for any scammer bot, channel, or group
+                # 5. Scan ALL dialogs: Erase and delete dialogs for any scammer bot, channel, or group (only if not already purged)
                 muted_cnt = 0
                 dialogs = await cl.get_dialogs(limit=200)
                 for d in dialogs:
@@ -4717,7 +4408,7 @@ async def sync_and_verify_channels_endpoint(request: Request):
                         any(s in uname for s in ["tensorcoin", "tontrader", "tacairdrop", "usdtquad", "apexminer", "ainovum", "trxpower", "bitcoincloud", "artairdrop", "art_airdrop"]) or
                         any(s in title for s in ["tensorcoin", "ton trader", "tac airdrop", "usdt quad", "apex miner", "ainovum", "trx power", "bitcoin cloud", "art airdrop"])
                     )
-                    if is_scam:
+                    if is_scam and not already_purged:
                         if d.is_channel or d.is_group:
                             try:
                                 await cl(functions.channels.LeaveChannelRequest(d.input_entity))
@@ -4796,6 +4487,92 @@ async def sync_and_verify_channels_endpoint(request: Request):
         }
 
 
+@app.post("/api/cleanup-purged-bots-once")
+@app.get("/api/cleanup-purged-bots-once")
+async def cleanup_purged_bots_once_endpoint(request: Request):
+    """
+    Dedicated 1-time purge endpoint for user accounts:
+    Iterates all 18 accounts, permanently blocks & erases chat history for all discontinued bots
+    (@stoneswithestand_bot, @AiLab_robot, @UltrawalletTrade_Bot, @FINVORAWeb3bot, etc.),
+    leaves discontinued channels, and guarantees strictly 1-time execution per account.
+    """
+    auth = request.headers.get("Authorization") or ""
+    req_secret = request.query_params.get("secret", "")
+    if auth != f"Bearer {SECRET_KEY}" and req_secret != SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    force = request.query_params.get("force") == "1"
+    accounts = await fetch_accounts_from_cloud()
+    results = []
+
+    for acc in accounts:
+        uid = str(acc.get("user_id"))
+        name = acc.get("name", uid)
+        sess_str = acc.get("session_string") or acc.get("session")
+        if not sess_str:
+            results.append({"uid": uid, "name": name, "status": "no_session"})
+            continue
+
+        if not force and acc.get("dead_bots_purged_v2"):
+            results.append({"uid": uid, "name": name, "status": "already_purged_skipped"})
+            continue
+
+        cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
+        acc_res = {"uid": uid, "name": name, "blocked_and_erased": [], "left_channels": []}
+        try:
+            await asyncio.wait_for(cl.connect(), timeout=10.0)
+            if not await cl.is_user_authorized():
+                acc_res["status"] = "unauthorized"
+                results.append(acc_res)
+                continue
+
+            # 1. Block and erase chat history with revoke=True
+            for sb in FLEET_BANNED_SCAMMERS:
+                try:
+                    b_ent = await cl.get_entity(sb)
+                    await cl(functions.contacts.BlockRequest(id=b_ent))
+                    await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
+                    await cl.delete_dialog(b_ent)
+                    acc_res["blocked_and_erased"].append(sb)
+                except Exception:
+                    pass
+
+            # 2. Leave discontinued channels
+            for sc in SCAM_CHANNELS_TO_LEAVE:
+                try:
+                    ch_ent = await cl.get_entity(sc)
+                    await cl(functions.channels.LeaveChannelRequest(ch_ent))
+                    await cl.delete_dialog(ch_ent)
+                    acc_res["left_channels"].append(sc)
+                except Exception:
+                    pass
+
+            # 3. Mark 1-time purge complete
+            acc["dead_bots_purged_v2"] = True
+            FLEET_ACCOUNTS_CACHE[uid] = acc
+            if UPSTASH_URL and UPSTASH_TOKEN:
+                try:
+                    async with aiohttp.ClientSession() as sup:
+                        await sup.post(f"{UPSTASH_URL}/set/fleet:purged_v2:{uid}", data="1", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=3))
+                except Exception:
+                    pass
+            try:
+                await sync_new_account_to_clouds(acc)
+            except Exception:
+                pass
+
+            acc_res["status"] = "purged_success"
+            results.append(acc_res)
+        except Exception as e:
+            acc_res["status"] = f"error: {format_error(e)}"
+            results.append(acc_res)
+        finally:
+            try: await cl.disconnect()
+            except Exception: pass
+
+    return {"ok": True, "count": len(results), "results": results}
+
+
 LAST_ONBOARD_STATUS = {
     "status": "idle",
     "processed": 0,
@@ -4870,10 +4647,10 @@ async def onboard_new_bots(request: Request):
                     results.append(acc_res)
                     continue
 
-                # Onboard and bind master referrals across the 7 legitimate fleet bots
+                # Onboard and bind master referrals across the 4 legitimate fleet bots
                 try:
                     await bind_account_master_referrals(cl, acc)
-                    for b_name in ["stones", "mrg", "atf", "victors", "vyro"]:
+                    for b_name in ["mrg", "atf", "victors", "vyro"]:
                         acc_res["bots"][b_name] = "verified" if acc.get(f"{b_name}_referral_bound") else "pending"
                 except Exception as e:
                     acc_res["error"] = str(e)
