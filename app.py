@@ -459,7 +459,18 @@ async def extract_bot_webapp_token(client: TelegramClient, bot_username: str, st
 async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     """Extracts fresh WebApp session initData tokens across all 7 active MiniApp bots."""
     name = acc.get("name", "User")
-    uid = str(acc.get("user_id"))
+    uid = str(acc.get("user_id")) if acc.get("user_id") else None
+    if not uid or uid == "None":
+        try:
+            me = await client.get_me()
+            if me:
+                uid = str(me.id)
+                name = me.first_name or name
+                acc["user_id"] = me.id
+                acc["name"] = name
+        except Exception:
+            pass
+    uid = uid or "unknown"
     tokens = {
         "account_id": uid,
         "name": name,
