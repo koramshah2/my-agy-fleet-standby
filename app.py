@@ -4238,8 +4238,9 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                 # 1. Verify profile using humanPass
                 await jitter(0.5, 1.2)
                 m_code, m_d = await safe_get("https://server.victors.company/api/me", req_headers=v_h)
-                is_auth_ok = (m_code == 200 and isinstance(m_d, dict) and (m_d.get("success") is True or "user" in m_d or "miningBalance" in m_d))
-                me = (m_d.get("user") or m_d) if (is_auth_ok and isinstance(m_d, dict)) else {}
+                is_auth_ok = (m_code == 200 and isinstance(m_d, dict) and (m_d.get("success") is True or "state" in m_d or "user" in m_d))
+                st = m_d.get("state", {}) if isinstance(m_d, dict) else {}
+                me = (st.get("user") or m_d.get("user") or m_d) if (is_auth_ok and isinstance(m_d, dict)) else {}
 
                 if not is_auth_ok or not me:
                     if (not vic_pass) or m_code in (401, 403) or (isinstance(m_d, dict) and m_d.get("code") == "HUMAN_REQUIRED"):
@@ -4248,22 +4249,11 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                         status["bots"]["victors"] = f"auth_failed (code {m_code})"
                     return
 
-                lvl = me.get("level", 1)
+                lvl = me.get("peakLevel") or me.get("level", 1)
+                in_app_bal = me.get("inAppBalance", 0)
 
-                if not me.get("tutorialCompleted"):
+                if not me.get("tutorialDone"):
                     await safe_post("https://server.victors.company/api/me/tutorial", json_data={}, req_headers=v_h)
-
-                # Connect TON wallet to qualify recruit & unlock Level 1 Miner
-                v_ton_entry = (acc.get("ton_wallet") or {}).get("address")
-                if not v_ton_entry:
-                    _, ton_cache = await load_fleet_wallets_from_cloud()
-                    if ton_cache:
-                        raw_w = ton_cache.get(str(uid)) or ton_cache.get(uid)
-                        v_ton_entry = raw_w.get("address") if isinstance(raw_w, dict) else raw_w
-                if v_ton_entry and not me.get("walletAddress"):
-                    await safe_post("https://server.victors.company/api/wallet/connect", json_data={"address": v_ton_entry}, req_headers=v_h)
-                    await jitter(0.5, 1.0)
-                    await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": "connect-wallet"}, req_headers=v_h)
 
                 # 2. Daily checkin
                 await jitter(0.6, 1.5)
@@ -4279,38 +4269,34 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
                     await jitter(0.5, 1.2)
                     await safe_post("https://server.victors.company/api/levels/unlock", json_data={"level": unlocked}, req_headers=v_h)
 
-                # 5. Tasks
+                # 5. Tasks discovery & claim
                 await jitter(0.8, 1.6)
                 _, t_d = await safe_get("https://server.victors.company/api/tasks", req_headers=v_h)
                 if t_d and isinstance(t_d, dict):
                     tasks = t_d.get("tasks", [])
                     if isinstance(tasks, list):
                         for t in tasks:
-                            if isinstance(t, dict) and t.get("id") and not t.get("claimed"):
-                                await jitter(0.4, 0.9)
-                                await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": t["id"]}, req_headers=v_h)
+                            if isinstance(t, dict):
+                                tid = t.get("taskId") or t.get("id")
+                                if tid and t.get("status") == "open":
+                                    await jitter(0.4, 0.9)
+                                    await safe_post("https://server.victors.company/api/tasks/claim", json_data={"taskId": tid}, req_headers=v_h)
 
                 # 6. Referral claim bonus & commission
                 await jitter(0.6, 1.4)
                 await safe_post("https://server.victors.company/api/referral/claim-bonus", json_data={}, req_headers=v_h)
                 await safe_post("https://server.victors.company/api/referral/claim-commission", json_data={}, req_headers=v_h)
 
-                # 7. Arcade Minigame Mining (Play 1 run)
+                # 7. Deep Mine Arcade Minigame Solver
                 try:
-                    _, a_d = await safe_get("https://server.victors.company/api/arcade", req_headers=v_h)
-                    if a_d and isinstance(a_d, dict) and a_d.get("runsLeft", 0) > 0:
-                        st_c, _ = await safe_post("https://server.victors.company/api/arcade/mine/start", json_data={"tool": "pickaxe", "items": []}, req_headers=v_h)
-                        if st_c in (200, 201):
-                            for d in range(4):
-                                await jitter(0.4, 0.9)
-                                _, d_res = await safe_post("https://server.victors.company/api/arcade/mine/dig", json_data={"x": 4, "y": d}, req_headers=v_h)
-                                if not d_res or (isinstance(d_res, dict) and d_res.get("result") == "bust"):
-                                    break
-                            await safe_post("https://server.victors.company/api/arcade/mine/end", json_data={}, req_headers=v_h)
-                except Exception:
-                    pass
+                    from victors_arcade_solver import solve_deep_mine_expeditions
+                    arc_stats = await solve_deep_mine_expeditions(session, v_h, name, max_runs=2)
+                    if arc_stats.get("runs_played", 0) > 0 and arc_stats.get("final_balance") is not None:
+                        in_app_bal = arc_stats["final_balance"]
+                except Exception as arc_e:
+                    logger.debug(f"[{name}] [Victors Arcade] note: {arc_e}")
 
-                bal_str = f" (lvl: {lvl}, bal: {me.get('miningBalance', 0)})"
+                bal_str = f" (lvl: {lvl}, bal: {in_app_bal} VIC)"
                 status["bots"]["victors"] = f"farmed{bal_str}"
                 return
             except Exception as e:
@@ -5154,6 +5140,9 @@ CHANNEL_WHITELIST = {
     "gramworkers",
     "finvoraweb3",
     "VictorsCompany",
+    "victors_company",
+    "VICWithdrawals",
+    "TheBoss_Victor",
     "vyrodrop",
     "atfminers"
 }
@@ -5165,7 +5154,7 @@ MANDATORY_SPONSOR_CHANNELS = [
     "mrgminer", "mrgfun", "mrgwithdrawal", "DurovKidney",
     "ailabrobotnews",
     "ultrawalletofficial",
-    "VictorsCompany",
+    "VictorsCompany", "victors_company", "VICWithdrawals", "TheBoss_Victor",
     "vyrodrop",
     "atfminers"
 ]
