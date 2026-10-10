@@ -155,6 +155,8 @@ VICTORS_BOT = "VictorsCompanybot"
 VICTORS_REFERRAL_CODE = "ref_A20AA96F18"
 VYRO_BOT = "vyrodrop_bot"
 VYRO_REFERRAL_CODE = "ref_myFjrqqE4WN_"
+KYNEX_BOT = "Kynex_miningbot"
+KYNEX_REFERRAL_CODE = "6727787768"
 
 LAST_BATCH_RUN = {
     "status": "idle",
@@ -212,10 +214,11 @@ def is_token_data_expired(t_dict: dict, max_age_hours: float = 20.0) -> bool:
     except Exception:
         return True
 
-    # Check individual token auth_date signatures (4 Legitimate WebApp Bots)
+    # Check individual token auth_date signatures (5 Legitimate WebApp Bots)
     key_tokens = [
         "mrg_init_data", "atf_init_data",
-        "victors_init_data", "vyro_init_data"
+        "victors_init_data", "vyro_init_data",
+        "kynex_init_data"
     ]
     missing_cnt = 0
     expired_cnt = 0
@@ -460,8 +463,22 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     if tok:
         tokens["vyro_init_data"] = tok
 
+    # 5. Kynex Network (@Kynex_miningbot)
+    ky_param = None if is_master else KYNEX_REFERRAL_CODE
+    try:
+        b_ky = await client.get_entity(KYNEX_BOT)
+        if ky_param:
+            await client.send_message(b_ky, f"/start {ky_param}")
+        else:
+            await client.send_message(b_ky, "/start")
+    except Exception:
+        pass
+    tok = await extract_bot_webapp_token(client, KYNEX_BOT, start_param=ky_param, default_url="https://kynex.top/telegram-auth.html", candidate_short_names=["App", "app"])
+    if tok:
+        tokens["kynex_init_data"] = tok
+
     # Auto-join mandatory sponsor channels so side-task verifications succeed across all bots
-    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "VictorsCompany", "victors_company", "VICWithdrawals", "TheBoss_Victor", "vyrodrop", "atfminers"]:
+    for s_ch in ["mrgminer", "mrgwithdrawal", "DurovKidney", "VictorsCompany", "victors_company", "VICWithdrawals", "TheBoss_Victor", "vyrodrop", "atfminers", "kynex_mining", "EarnVaulte", "solanamemes001", "Web3Primeteam"]:
         try:
             await client(JoinChannelRequest(s_ch))
             await asyncio.sleep(0.3)
@@ -1356,15 +1373,26 @@ async def bootstrap_account_mining(acc_entry: dict, tokens: dict):
                 logger.info(f"[{name}] ✅ ATF Miner referral finish work & starter tasks completed")
             except Exception as e:
                 logger.debug(f"[{name}] ATF Miner bootstrap note: {e}")
+
+        # 6. Kynex Network (@Kynex_miningbot)
+        if tokens.get("kynex_init_data"):
+            try:
+                import kynex_miner
+                k_res = await kynex_miner.farm_kynex_account(http, tokens["kynex_init_data"], acc_entry, is_master=(uid == "6727787768"))
+                logger.info(f"[{name}] ✅ Kynex Network bootstrap: {k_res.get('status')}")
+            except Exception as ke:
+                logger.debug(f"[{name}] Kynex bootstrap note: {ke}")
+
 def is_account_referrals_bound(acc_entry: dict) -> bool:
-    """Checks whether an account already has its master referrals bound across all 4 active legitimate bots."""
+    """Checks whether an account already has its master referrals bound across all 5 active legitimate bots."""
     if acc_entry.get("all_4_referrals_bound") or acc_entry.get("all_5_referrals_bound") or acc_entry.get("all_9_referrals_bound"):
         return True
     return bool(
         acc_entry.get("atf_referral_bound") and
         acc_entry.get("mrg_referral_bound") and
         acc_entry.get("victors_referral_bound") and
-        acc_entry.get("vyro_referral_bound")
+        acc_entry.get("vyro_referral_bound") and
+        acc_entry.get("kynex_referral_bound")
     )
 
 
@@ -1734,10 +1762,11 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
     except Exception:
         pass
 
-    # Fallback: if tokens is missing required bot keys, re-extract with fresh standalone client (4 Legitimate WebApp Bots)
+    # Fallback: if tokens is missing required bot keys, re-extract with fresh standalone client (5 Legitimate WebApp Bots)
     req_keys = [
         "mrg_init_data", "atf_init_data",
-        "victors_init_data", "vyro_init_data"
+        "victors_init_data", "vyro_init_data",
+        "kynex_init_data"
     ]
     if not tokens or any(not tokens.get(k) for k in req_keys):
         logger.info(f"[{name}] Missing some bot tokens after direct extraction. Re-extracting with standalone client...")
@@ -3372,6 +3401,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
                 if not is_auth_ok or not me:
                     if (not vic_pass) or m_code in (401, 403) or (isinstance(m_d, dict) and m_d.get("code") == "HUMAN_REQUIRED"):
+                        set_cached_upstash_pass(f"victors:pass:{uid}", None, ttl=1)
                         status["bots"]["victors"] = "human_pass_required (Turnstile needed)"
                     else:
                         status["bots"]["victors"] = f"auth_failed (code {m_code})"
@@ -3533,12 +3563,26 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
         status["bots"]["vyro"] = "skipped (no initData)"
 
-    # Humanized Concurrent Execution Pipeline: 4 Active Legitimate Bots
+    # 9. Kynex Network (@Kynex_miningbot)
+    async def _farm_kynex():
+        if tokens.get("kynex_init_data"):
+            try:
+                import kynex_miner
+                res = await kynex_miner.farm_kynex_account(session, tokens["kynex_init_data"], acc, is_master=is_owner)
+                status["bots"]["kynex"] = res.get("status", "farmed")
+                return
+            except Exception as e:
+                status["bots"]["kynex"] = f"api_error: {format_error(e)}"
+                return
+        status["bots"]["kynex"] = "skipped (no initData)"
+
+    # Humanized Concurrent Execution Pipeline: 5 Active Legitimate Bots
     bot_routines = [
         {"name": "mrg", "fn": _farm_mrg, "has_data": bool(tokens.get("mrg_init_data"))},
         {"name": "atf", "fn": _farm_atf, "has_data": bool(tokens.get("atf_init_data"))},
         {"name": "victors", "fn": _farm_victors, "has_data": bool(tokens.get("victors_init_data"))},
         {"name": "vyro", "fn": _farm_vyro, "has_data": bool(tokens.get("vyro_init_data"))},
+        {"name": "kynex", "fn": _farm_kynex, "has_data": bool(tokens.get("kynex_init_data"))},
     ]
 
     for b in bot_routines:
@@ -3548,7 +3592,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
     active_routines = [b for b in bot_routines if b["has_data"]]
     random.shuffle(active_routines)
 
-    sem_bot = asyncio.Semaphore(4)
+    sem_bot = asyncio.Semaphore(5)
 
     async def _run_single_routine(b):
         async with sem_bot:
@@ -3695,8 +3739,8 @@ async def api_farm_single_account(uid: str, request: Request):
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as session:
             tokens_map = await fetch_cloud_miniapp_tokens(session)
             acc_tok = tokens_map.get(str(uid), {})
-            key_4_tokens = ["mrg_init_data", "atf_init_data", "victors_init_data", "vyro_init_data"]
-            missing_or_expired = (not acc_tok) or any(k not in acc_tok for k in key_4_tokens) or is_token_data_expired(acc_tok)
+            key_5_tokens = ["mrg_init_data", "atf_init_data", "victors_init_data", "vyro_init_data", "kynex_init_data"]
+            missing_or_expired = (not acc_tok) or any(k not in acc_tok for k in key_5_tokens) or is_token_data_expired(acc_tok)
             if missing_or_expired:
                 fresh = await extract_tokens_for_account(target_acc)
                 if fresh:
@@ -4093,7 +4137,8 @@ async def study_bot_endpoint(bot_key: str, request: Request):
         "mrg": "mrgminerbot",
         "atf": "ATF_AIRDROP_bot",
         "victors": "VictorsCompanybot",
-        "vyro": "vyrodrop_bot"
+        "vyro": "vyrodrop_bot",
+        "kynex": "Kynex_miningbot"
     }
 
     target_bots = list(bot_map.items()) if bot_key == "all" else [(bot_key, bot_map[bot_key])] if bot_key in bot_map else None
@@ -4216,7 +4261,8 @@ async def inspect_bot_chat(uid: str, request: Request):
         ("mrg", "mrgminerbot"),
         ("atf", "ATF_AIRDROP_bot"),
         ("victors", "VictorsCompanybot"),
-        ("vyro", "vyrodrop_bot")
+        ("vyro", "vyrodrop_bot"),
+        ("kynex", "Kynex_miningbot")
     ]
     chats = {}
     try:
@@ -4362,7 +4408,11 @@ CHANNEL_WHITELIST = {
     "VICWithdrawals",
     "TheBoss_Victor",
     "vyrodrop",
-    "atfminers"
+    "atfminers",
+    "kynex_mining",
+    "EarnVaulte",
+    "solanamemes001",
+    "Web3Primeteam"
 }
 
 # Active Legitimate Sponsor Channels (Scammers, TRX Power, ART, AI Lab, UltraWallet, FINVORA & Stones purged)
@@ -4370,13 +4420,18 @@ MANDATORY_SPONSOR_CHANNELS = [
     "mrgminer", "mrgfun", "mrgwithdrawal", "DurovKidney",
     "VictorsCompany", "victors_company", "VICWithdrawals", "TheBoss_Victor",
     "vyrodrop",
-    "atfminers"
+    "atfminers",
+    "kynex_mining",
+    "EarnVaulte",
+    "solanamemes001",
+    "Web3Primeteam"
 ]
 
-# 4 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
+# 5 High-Conviction Legitimate Fleet Bots (100% REST-Based Mini-Apps)
 FLEET_LEGITIMATE_BOTS = [
     "mrgminerbot", "ATF_AIRDROP_bot",
-    "VictorsCompanybot", "vyrodrop_bot"
+    "VictorsCompanybot", "vyrodrop_bot",
+    "Kynex_miningbot"
 ]
 
 # Blacklisted & Purged Bots to permanently block and delete from Telegram dialogs
