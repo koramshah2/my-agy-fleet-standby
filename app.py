@@ -2308,6 +2308,156 @@ async def cancel_login(request: Request):
     return {"ok": True, "message": "Login cancelled"}
 
 
+@app.get("/api/fleet/otp/{acc_target}")
+@app.post("/api/fleet/otp/{acc_target}")
+async def get_account_otp(acc_target: str, request: Request):
+    """
+    Fetches the latest Telegram login OTP verification code for a specific fleet account.
+    Checks peer 777000 (Telegram Service Notifications) first.
+    Falls back to Gmail IMAP if no recent Telegram message exists.
+    """
+    try:
+        accounts = await get_fleet_accounts()
+        if not accounts and os.path.exists("accounts.json"):
+            try:
+                with open("accounts.json", "r", encoding="utf-8") as f:
+                    accounts = json.load(f)
+            except Exception:
+                pass
+
+        target_acc = None
+        target_idx = None
+        try:
+            target_idx = int(acc_target)
+            for i, a in enumerate(accounts):
+                if a.get("index") == target_idx or (not a.get("index") and (i + 1) == target_idx):
+                    target_acc = a
+                    target_idx = a.get("index") or (i + 1)
+                    break
+        except ValueError:
+            pass
+
+        if not target_acc:
+            clean_tgt = re.sub(r"[^\d+]", "", acc_target)
+            for i, a in enumerate(accounts):
+                p = a.get("phone", "")
+                uid = str(a.get("user_id", ""))
+                if p == clean_tgt or uid == clean_tgt or acc_target.lower() in str(a.get("name", "")).lower():
+                    target_acc = a
+                    target_idx = a.get("index") or (i + 1)
+                    break
+
+        if not target_acc:
+            return {"ok": False, "found": False, "error": f"Account '{acc_target}' not found in fleet"}
+
+        sess = target_acc.get("session_string")
+        name = target_acc.get("name", f"Account #{target_idx}")
+        phone = target_acc.get("phone", "N/A")
+        password_2fa = os.getenv("FLEET_2FA_PASSWORD", "Arif216@")
+
+        if not sess:
+            return {"ok": False, "found": False, "error": f"No active session string for {name} ({phone})"}
+
+        # 1. Check active MTProto Telegram session peer 777000
+        client = TelegramClient(StringSession(sess), API_ID, API_HASH, timeout=12)
+        await client.connect()
+
+        tg_code = None
+        tg_date = None
+        tg_snippet = ""
+        try:
+            if await client.is_user_authorized():
+                messages = await client.get_messages(777000, limit=3)
+                for msg in messages:
+                    if not msg or not msg.message:
+                        continue
+                    m = re.search(r"Login code:\s*(\d{5})", msg.message, re.IGNORECASE) or re.search(r"\b(\d{5})\b", msg.message)
+                    if m:
+                        msg_ts = msg.date.timestamp() if hasattr(msg.date, "timestamp") else time.time()
+                        if time.time() - msg_ts < 1500:
+                            tg_code = m.group(1)
+                            tg_date = msg_ts
+                            tg_snippet = msg.message[:180]
+                            break
+        except Exception as e:
+            logger.warning(f"[OTP Cloud Fetch] 777000 check note for #{target_idx}: {e}")
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+        if tg_code:
+            age = int(time.time() - tg_date)
+            return {
+                "ok": True,
+                "found": True,
+                "index": target_idx,
+                "name": name,
+                "phone": phone,
+                "code": tg_code,
+                "password_2fa": password_2fa,
+                "source": "telegram_777000",
+                "age_seconds": age,
+                "snippet": tg_snippet
+            }
+
+        # 2. Fallback: Check Gmail IMAP if configured
+        gmail_user = os.getenv("GMAIL_ADDRESS", "aaa.support.a@gmail.com")
+        gmail_pass = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+        if gmail_pass:
+            try:
+                import imaplib, email as email_mod
+                mail = imaplib.IMAP4_SSL("imap.gmail.com", timeout=10)
+                mail.login(gmail_user, gmail_pass)
+                mail.select("inbox")
+                status, msgs = mail.search(None, "ALL")
+                if status == "OK" and msgs[0]:
+                    mail_ids = msgs[0].split()
+                    for mid in reversed(mail_ids[-6:]):
+                        s, data = mail.fetch(mid, "(RFC822)")
+                        if s != "OK":
+                            continue
+                        msg_obj = email_mod.message_from_bytes(data[0][1])
+                        subject = str(msg_obj.get("Subject", ""))
+                        to_addr = str(msg_obj.get("To", ""))
+                        from_addr = str(msg_obj.get("From", ""))
+
+                        if "telegram" in from_addr.lower() or "telegram" in subject.lower():
+                            if f"+{target_idx}@" in to_addr or target_idx in [14, 16] or "code" in subject.lower():
+                                m = re.search(r"\b(\d{5,6})\b", subject)
+                                if m:
+                                    mail.logout()
+                                    return {
+                                        "ok": True,
+                                        "found": True,
+                                        "index": target_idx,
+                                        "name": name,
+                                        "phone": phone,
+                                        "code": m.group(1),
+                                        "password_2fa": password_2fa,
+                                        "source": "gmail_inbox",
+                                        "age_seconds": 60,
+                                        "snippet": subject
+                                    }
+                mail.logout()
+            except Exception as ge:
+                logger.debug(f"[OTP Cloud Fetch] Gmail IMAP check note: {ge}")
+
+        return {
+            "ok": True,
+            "found": False,
+            "index": target_idx,
+            "name": name,
+            "phone": phone,
+            "password_2fa": password_2fa,
+            "message": "No recent login code found. Request code in Telegram app first, then tap Check Again."
+        }
+    except Exception as exc:
+        logger.error(f"[OTP Cloud Fetch] Error for {acc_target}: {exc}")
+        return {"ok": False, "found": False, "error": str(exc)}
+
+
 # =============================================================================
 # 100% CLOUD AUTOMATED WITHDRAWALS & ON-CHAIN VAULT SWEEPER ENGINE
 # =============================================================================
@@ -2867,7 +3017,7 @@ async def fetch_cloud_miniapp_tokens(session: aiohttp.ClientSession) -> dict:
                                                 pass
                                     UPSTASH_TOKENS_CACHE = {"data": cached_tokens, "ts": now_t}
             except Exception as ue:
-            logger.warning(f"Upstash token merge error: {ue}")
+                logger.warning(f"Upstash token merge error: {ue}")
 
     return tokens_map
 
