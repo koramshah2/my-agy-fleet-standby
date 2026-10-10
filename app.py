@@ -320,17 +320,9 @@ async def extract_bot_webapp_token(client: TelegramClient, bot_username: str, st
     except Exception:
         pass
 
-    # Strategy C: Inline Keyboard buttons in recent bot messages
+    # Strategy C: Inline Keyboard buttons in existing bot messages (Zero-spam: never send /start)
     try:
         msgs = await client.get_messages(bot_ent, limit=5)
-        has_any_btn = any(m.buttons for m in msgs) if msgs else False
-        if not msgs or not has_any_btn:
-            try:
-                await client.send_message(bot_ent, f"/start {start_param}" if start_param else "/start")
-                await asyncio.sleep(2.0)
-                msgs = await client.get_messages(bot_ent, limit=5)
-            except Exception:
-                pass
         for m in msgs:
             if not m.out and m.buttons:
                 for row in m.buttons:
@@ -427,52 +419,26 @@ async def extract_tokens_with_client(client: TelegramClient, acc: dict) -> dict:
     if tok:
         tokens["mrg_init_data"] = tok
 
-    # 2. ATF Miner (@ATF_AIRDROP_bot)
+    # 2. ATF Miner (@ATF_AIRDROP_bot - Silent WebApp query, zero chat messages)
     atf_param = None if is_master else ATF_REFERRAL_CODE
-    try:
-        b_atf = await client.get_entity(ATF_BOT)
-        if atf_param:
-            await client.send_message(b_atf, f"/start {atf_param}")
-        else:
-            await client.send_message(b_atf, "/start")
-    except Exception:
-        pass
     tok = await extract_bot_webapp_token(client, ATF_BOT, start_param=atf_param, default_url="https://atfminers.asloni.online/miner/index.html?entry=bot_start", candidate_short_names=["app", "miner", "play"])
     if tok:
         tokens["atf_init_data"] = tok
 
-    # 3. Victor's Company (@VictorsCompanybot)
+    # 3. Victor's Company (@VictorsCompanybot - Silent WebApp query, zero chat messages)
     v_param = VICTORS_REFERRAL_CODE
-    try:
-        b_vic = await client.get_entity(VICTORS_BOT)
-        await client.send_message(b_vic, f"/start {v_param}")
-    except Exception:
-        pass
     tok = await extract_bot_webapp_token(client, VICTORS_BOT, start_param=v_param, default_url="https://app.victors.company/", candidate_short_names=["app", "play"])
     if tok:
         tokens["victors_init_data"] = tok
 
-    # 4. VyroDrop (@vyrodrop_bot)
+    # 4. VyroDrop (@vyrodrop_bot - Silent WebApp query, zero chat messages)
     vy_param = VYRO_REFERRAL_CODE
-    try:
-        b_vy = await client.get_entity(VYRO_BOT)
-        await client.send_message(b_vy, f"/start {vy_param}")
-    except Exception:
-        pass
     tok = await extract_bot_webapp_token(client, VYRO_BOT, start_param=vy_param, default_url="https://vyro.run.place/", candidate_short_names=["app", "vyro", "play", "mine"])
     if tok:
         tokens["vyro_init_data"] = tok
 
-    # 5. Kynex Network (@Kynex_miningbot)
+    # 5. Kynex Network (@Kynex_miningbot - Silent WebApp query, zero chat messages)
     ky_param = None if is_master else KYNEX_REFERRAL_CODE
-    try:
-        b_ky = await client.get_entity(KYNEX_BOT)
-        if ky_param:
-            await client.send_message(b_ky, f"/start {ky_param}")
-        else:
-            await client.send_message(b_ky, "/start")
-    except Exception:
-        pass
     tok = await extract_bot_webapp_token(client, KYNEX_BOT, start_param=ky_param, default_url="https://kynex.top/telegram-auth.html", candidate_short_names=["App", "app"])
     if tok:
         tokens["kynex_init_data"] = tok
@@ -1597,25 +1563,8 @@ async def interact_and_verify_bot(client: TelegramClient, bot_username: str, sta
                         if clicked_action:
                             break
 
-            # 4. Check for Reply Keyboards in reply_markup and send text triggers
-            if hasattr(latest_msg, "reply_markup") and latest_msg.reply_markup and not clicked_action:
-                try:
-                    rm = latest_msg.reply_markup
-                    if hasattr(rm, "rows"):
-                        for row in rm.rows:
-                            if hasattr(row, "buttons"):
-                                for btn in row.buttons:
-                                    b_text = getattr(btn, 'text', '') or ''
-                                    b_low = b_text.strip().lower()
-                                    if any(k in b_low for k in ["mining", "mine", "start mining", "bonus", "claim", "account", "balance"]):
-                                        logger.info(f"[{name}] Sending ReplyKeyboard action '{b_text}' to @{bot_username}")
-                                        await client.send_message(bot, b_text)
-                                        clicked_action = True
-                                        break
-                            if clicked_action:
-                                break
-                except Exception as rme:
-                    logger.debug(f"[{name}] ReplyKeyboard note: {rme}")
+            # 4. Reply Keyboards: Mini App farming is handled via API endpoints, no text spam in Telegram chats
+            pass
 
             if clicked_action:
                 await asyncio.sleep(2.0)
@@ -1657,7 +1606,21 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
     4. VyroDrop: ref_myFjrqqE4WN_
     """
     name = acc_entry.get("name", "User")
-    uid = acc_entry.get("user_id")
+    uid = str(acc_entry.get("user_id"))
+
+    # STRICT GUARD: Master account owns all referral codes; NEVER send /start ref messages to itself!
+    if uid == "6727787768" or uid == str(REPORT_CHAT_ID) or acc_entry.get("is_primary"):
+        logger.info(f"[{name}] Master account detected ({uid}). Skipping referral binding completely.")
+        tokens = {}
+        try:
+            if not client.is_connected():
+                await client.connect()
+            tokens = await extract_tokens_with_client(client, acc_entry)
+        except Exception:
+            pass
+        if tokens:
+            await sync_account_tokens_to_clouds(tokens)
+        return
 
     # STRICT GUARD: If account already has referrals bound, NEVER send /start messages!
     if is_account_referrals_bound(acc_entry):
@@ -3033,7 +2996,10 @@ async def fetch_cloud_miniapp_tokens(session: aiohttp.ClientSession) -> dict:
     return tokens_map
 
 
-async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, acc_tokens: dict) -> dict:
+FLEET_LAST_FARM_CACHE = {}
+
+
+async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, acc_tokens: dict, force: bool = False) -> dict:
     """
     Farms all 4 legitimate active bots (MRG, ATF, Victor's Company, VyroDrop) for a single account.
     Engineered with:
@@ -3579,6 +3545,20 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
         status["bots"]["kynex"] = "skipped (no initData)"
 
     # Humanized Concurrent Execution Pipeline: 5 Active Legitimate Bots
+    # Cooldowns matching real game economy & user directive:
+    # - ATF: 2.0h - 3.0h (7,200s - 10,800s) -> tasks refresh every 2 hours
+    # - MRG: 3.0h - 4.0h (10,800s - 14,400s) -> hashrate claim cycle
+    # - Victor's: 4.0h - 5.0h (14,400s - 18,000s) -> arcade energy & offline earnings
+    # - Vyro: 4.0h - 6.0h (14,400s - 21,600s) -> mining session duration
+    # - Kynex: 6.0h - 8.0h (21,600s - 28,800s) -> 12h energy bar replenishment
+    BOT_COOLDOWNS = {
+        "atf": (7200, 10800),
+        "mrg": (10800, 14400),
+        "victors": (14400, 18000),
+        "vyro": (14400, 21600),
+        "kynex": (21600, 28800)
+    }
+
     bot_routines = [
         {"name": "mrg", "fn": _farm_mrg, "has_data": bool(tokens.get("mrg_init_data"))},
         {"name": "atf", "fn": _farm_atf, "has_data": bool(tokens.get("atf_init_data"))},
@@ -3594,17 +3574,65 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
     active_routines = [b for b in bot_routines if b["has_data"]]
     random.shuffle(active_routines)
 
+    now_ts = int(time.time())
     sem_bot = asyncio.Semaphore(5)
 
     async def _run_single_routine(b):
+        b_name = b["name"]
+        min_s, max_s = BOT_COOLDOWNS.get(b_name, (7200, 10800))
+        cd_key = f"fleet:last_farm:{b_name}:{uid}"
+
+        should_farm = True
+        if not force:
+            try:
+                last_farm_raw = None
+                if UPSTASH_URL and UPSTASH_TOKEN:
+                    try:
+                        async with session.get(f"{UPSTASH_URL}/get/{cd_key}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=2.0)) as u_resp:
+                            if u_resp.status == 200:
+                                u_data = await u_resp.json()
+                                last_farm_raw = u_data.get("result")
+                    except Exception:
+                        pass
+                if not last_farm_raw:
+                    last_farm_raw = FLEET_LAST_FARM_CACHE.get(f"{b_name}:{uid}")
+
+                if last_farm_raw:
+                    try:
+                        last_obj = json.loads(last_farm_raw) if isinstance(last_farm_raw, str) and last_farm_raw.startswith("{") else None
+                        last_time = int(last_obj.get("timestamp", 0)) if last_obj else int(last_farm_raw)
+                        cd_sec = int(last_obj.get("cooldown", min_s)) if last_obj else min_s
+                        elapsed = now_ts - last_time
+                        if last_time > 0 and elapsed < cd_sec:
+                            rem_m = max(1, (cd_sec - elapsed) // 60)
+                            status["bots"][b_name] = f"cooldown ({rem_m}m remaining)"
+                            should_farm = False
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        if not should_farm:
+            return
+
         async with sem_bot:
             try:
                 await jitter(0.2, 0.6)
                 await asyncio.wait_for(b["fn"](), timeout=45.0)
+                # Store randomized cooldown for next harvest cycle
+                next_cd = random.randint(min_s, max_s)
+                val_to_save = json.dumps({"timestamp": now_ts, "cooldown": next_cd})
+                FLEET_LAST_FARM_CACHE[f"{b_name}:{uid}"] = val_to_save
+                if UPSTASH_URL and UPSTASH_TOKEN:
+                    try:
+                        async with session.post(f"{UPSTASH_URL}/set/{cd_key}", data=val_to_save, headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=2.0)):
+                            pass
+                    except Exception:
+                        pass
             except asyncio.TimeoutError:
-                status["bots"][b["name"]] = "timeout (45s)"
+                status["bots"][b_name] = "timeout (45s)"
             except Exception as err:
-                status["bots"][b["name"]] = f"error: {format_error(err)}"
+                status["bots"][b_name] = f"error: {format_error(err)}"
 
     await asyncio.gather(*[_run_single_routine(b) for b in active_routines], return_exceptions=True)
     if bg_tasks:
@@ -3615,7 +3643,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
     return status
 
 
-async def run_cloud_fleet_farming_cycle(session: aiohttp.ClientSession = None, accounts: list = None, tokens_map: dict = None) -> dict:
+async def run_cloud_fleet_farming_cycle(session: aiohttp.ClientSession = None, accounts: list = None, tokens_map: dict = None, force: bool = False) -> dict:
     """Executes full autonomous cloud farming and task completions across all 5 legitimate bots for all fleet accounts."""
     created_session = False
     if session is None:
@@ -3649,7 +3677,7 @@ async def run_cloud_fleet_farming_cycle(session: aiohttp.ClientSession = None, a
                     except Exception as ex_e:
                         logger.warning(f"[Farm Task] On-the-fly extraction note for {uid_str}: {ex_e}")
                 try:
-                    return await asyncio.wait_for(farm_single_account_bots(session, a_dict, t_dict), timeout=75.0)
+                    return await asyncio.wait_for(farm_single_account_bots(session, a_dict, t_dict, force=force), timeout=75.0)
                 except asyncio.TimeoutError:
                     return {"uid": uid_str, "name": a_dict.get("name", uid_str), "bots": {"status": "timeout_75s"}}
 
@@ -3690,6 +3718,7 @@ async def api_farm_cloud_all(request: Request):
         pass
 
     sync_mode = request.query_params.get("sync") == "1"
+    force_mode = request.query_params.get("force") == "1"
 
     async def _execute_farming():
         global LAST_FARM_RUN
@@ -3699,7 +3728,7 @@ async def api_farm_cloud_all(request: Request):
             async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as session:
                 accounts = await fetch_accounts_from_cloud()
                 tokens = await fetch_cloud_miniapp_tokens(session)
-                res = await run_cloud_fleet_farming_cycle(session, accounts, tokens)
+                res = await run_cloud_fleet_farming_cycle(session, accounts, tokens, force=force_mode)
                 LAST_FARM_RUN["status"] = "completed"
                 LAST_FARM_RUN["farmed_count"] = res.get("farmed_count", 0)
                 LAST_FARM_RUN["total_accounts"] = res.get("total_accounts", len(accounts) if accounts else 0)
@@ -3733,6 +3762,7 @@ async def api_farm_status():
 async def api_farm_single_account(uid: str, request: Request):
     """Executes on-demand cloud farming & token bootstrap for a single account in the fleet."""
     try:
+        force_mode = request.query_params.get("force") == "1"
         accounts = await fetch_accounts_from_cloud()
         target_acc = next((a for a in accounts if str(a.get("user_id")) == str(uid)), None)
         if not target_acc:
@@ -3753,7 +3783,7 @@ async def api_farm_single_account(uid: str, request: Request):
             if not acc_tok:
                 return {"ok": False, "message": "Failed to extract WebApp tokens for account", "uid": uid}
 
-            res = await farm_single_account_bots(session, target_acc, acc_tok)
+            res = await farm_single_account_bots(session, target_acc, acc_tok, force=force_mode)
             return {"ok": True, "result": res}
     except HTTPException:
         raise
@@ -4449,6 +4479,9 @@ FLEET_BANNED_SCAMMERS = [
     "Bitcoin_Cloud_Mining_bot",
     "ART_AIRDROP_BOT",
     "artairdrop_bot",
+    "goldkeepers_bot",
+    "earncraft_bot",
+    "pepe_gram_bot",
     # Previously blacklisted scammers
     "ainovum_bot",
     "tensormining_bot",
@@ -4467,6 +4500,7 @@ SCAM_CHANNELS_TO_LEAVE = [
     # Newly purged per user directive
     "stoneswithestand",
     "ailabrobotnews",
+    "AiLabRobotPayouts",
     "ultrawalletofficial",
     "ultrawallet",
     "finvoraweb3",
@@ -4477,6 +4511,9 @@ SCAM_CHANNELS_TO_LEAVE = [
     "trxpowermining",
     "art_airdrop",
     "artairdrop",
+    "artcoin_en",
+    "artwithdraw",
+    "earncraft_new",
     # Previously blacklisted scam channels
     "tensorcoinnews",
     "tontraderai_official",
@@ -4557,27 +4594,60 @@ async def sync_and_verify_channels_endpoint(request: Request):
 
                 # 1-TIME SANITATION: Only block, erase history, and leave discontinued bots once per account
                 if not already_purged:
-                    # 1. Permanently Block and DELETE chat history for all blacklisted bots
+                    # 1. Dialog-based multi-pass sanitation: Erase history completely & leave channels
+                    try:
+                        d_list = await cl.get_dialogs(limit=100)
+                        for d in d_list:
+                            u_low = (getattr(d.entity, 'username', '') or '').lower()
+                            t_low = (getattr(d.entity, 'title', '') or getattr(d.entity, 'first_name', '') or '').lower()
+                            is_chan = hasattr(d.entity, "broadcast") and getattr(d.entity, "broadcast", False)
+                            is_bot = getattr(d.entity, "bot", False)
+
+                            matches = any(b.lower() == u_low for b in FLEET_BANNED_SCAMMERS) or \
+                                      any(c.lower() == u_low for c in SCAM_CHANNELS_TO_LEAVE) or \
+                                      any(k in t_low for k in ["finvora", "turbo gram", "turbogram", "ai lab", "ailab", "stones white", "ultra wallet", "ultrawallet", "trx power", "gold keepers", "earncraft", "pepe", "art 🚀", "live withdraw"])
+                            if matches:
+                                if is_bot:
+                                    try: await cl(functions.contacts.BlockRequest(id=d.entity))
+                                    except Exception: pass
+                                if is_chan:
+                                    try: await cl(functions.channels.LeaveChannelRequest(d.entity))
+                                    except Exception: pass
+                                else:
+                                    try:
+                                        await cl(functions.messages.ReadHistoryRequest(peer=d.entity, max_id=0))
+                                        for _ in range(25):
+                                            r_del = await cl(functions.messages.DeleteHistoryRequest(peer=d.entity, max_id=0, just_clear=False, revoke=True))
+                                            if getattr(r_del, 'offset', 0) <= 0: break
+                                            await asyncio.sleep(0.2)
+                                    except Exception: pass
+                                try: await cl.delete_dialog(d.entity)
+                                except Exception: pass
+                                acc_res["deleted_dialogs"].append(u_low or t_low)
+                    except Exception as pe:
+                        logger.warning(f"[{name}] Dialog purge note: {pe}")
+
+                    # Direct entity fallback purge
                     for sb in FLEET_BANNED_SCAMMERS:
                         try:
                             b_ent = await cl.get_entity(sb)
                             await cl(functions.contacts.BlockRequest(id=b_ent))
-                            await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
+                            for _ in range(25):
+                                r_del = await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
+                                if getattr(r_del, 'offset', 0) <= 0: break
+                                await asyncio.sleep(0.2)
                             await cl.delete_dialog(b_ent)
                             acc_res["blocked_scammers"].append(sb)
-                            acc_res["deleted_dialogs"].append(sb)
-                        except Exception:
-                            pass
+                        except Exception: pass
 
-                    # 2. Leave and DELETE dialogs for all scammer channels
                     for sc in SCAM_CHANNELS_TO_LEAVE:
                         try:
                             ch_ent = await cl.get_entity(sc)
-                            await cl(functions.channels.LeaveChannelRequest(ch_ent))
+                            try: await cl(functions.channels.LeaveChannelRequest(ch_ent))
+                            except Exception: pass
                             await cl.delete_dialog(ch_ent)
                             acc_res["left_scam_channels"].append(sc)
-                        except Exception:
-                            pass
+                        except Exception: pass
 
                     acc["dead_bots_purged_v2"] = True
                     FLEET_ACCOUNTS_CACHE[uid] = acc
@@ -4743,26 +4813,60 @@ async def cleanup_purged_bots_once_endpoint(request: Request):
                 results.append(acc_res)
                 continue
 
-            # 1. Block and erase chat history with revoke=True
+            # 1. Dialog-based multi-pass sanitation: Erase history completely & leave channels
+            try:
+                d_list = await cl.get_dialogs(limit=100)
+                for d in d_list:
+                    u_low = (getattr(d.entity, 'username', '') or '').lower()
+                    t_low = (getattr(d.entity, 'title', '') or getattr(d.entity, 'first_name', '') or '').lower()
+                    is_chan = hasattr(d.entity, "broadcast") and getattr(d.entity, "broadcast", False)
+                    is_bot = getattr(d.entity, "bot", False)
+
+                    matches = any(b.lower() == u_low for b in FLEET_BANNED_SCAMMERS) or \
+                              any(c.lower() == u_low for c in SCAM_CHANNELS_TO_LEAVE) or \
+                              any(k in t_low for k in ["finvora", "turbo gram", "turbogram", "ai lab", "ailab", "stones white", "ultra wallet", "ultrawallet", "trx power", "gold keepers", "earncraft", "pepe", "art 🚀", "live withdraw"])
+                    if matches:
+                        if is_bot:
+                            try: await cl(functions.contacts.BlockRequest(id=d.entity))
+                            except Exception: pass
+                        if is_chan:
+                            try: await cl(functions.channels.LeaveChannelRequest(d.entity))
+                            except Exception: pass
+                        else:
+                            try:
+                                await cl(functions.messages.ReadHistoryRequest(peer=d.entity, max_id=0))
+                                for _ in range(25):
+                                    r_del = await cl(functions.messages.DeleteHistoryRequest(peer=d.entity, max_id=0, just_clear=False, revoke=True))
+                                    if getattr(r_del, 'offset', 0) <= 0: break
+                                    await asyncio.sleep(0.2)
+                            except Exception: pass
+                        try: await cl.delete_dialog(d.entity)
+                        except Exception: pass
+                        acc_res["blocked_and_erased"].append(u_low or t_low)
+            except Exception as pe:
+                logger.warning(f"[{name}] Dialog purge note: {pe}")
+
+            # Direct entity fallback purge
             for sb in FLEET_BANNED_SCAMMERS:
                 try:
                     b_ent = await cl.get_entity(sb)
                     await cl(functions.contacts.BlockRequest(id=b_ent))
-                    await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
+                    for _ in range(25):
+                        r_del = await cl(functions.messages.DeleteHistoryRequest(peer=b_ent, max_id=0, just_clear=False, revoke=True))
+                        if getattr(r_del, 'offset', 0) <= 0: break
+                        await asyncio.sleep(0.2)
                     await cl.delete_dialog(b_ent)
                     acc_res["blocked_and_erased"].append(sb)
-                except Exception:
-                    pass
+                except Exception: pass
 
-            # 2. Leave discontinued channels
             for sc in SCAM_CHANNELS_TO_LEAVE:
                 try:
                     ch_ent = await cl.get_entity(sc)
-                    await cl(functions.channels.LeaveChannelRequest(ch_ent))
+                    try: await cl(functions.channels.LeaveChannelRequest(ch_ent))
+                    except Exception: pass
                     await cl.delete_dialog(ch_ent)
                     acc_res["left_channels"].append(sc)
-                except Exception:
-                    pass
+                except Exception: pass
 
             # 3. Mark 1-time purge complete
             acc["dead_bots_purged_v2"] = True
