@@ -2388,14 +2388,16 @@ async def get_account_otp(acc_target: str, request: Request):
         tg_snippet = ""
         try:
             if await client.is_user_authorized():
-                messages = await client.get_messages(777000, limit=3)
+                messages = await client.get_messages(777000, limit=5)
                 for msg in messages:
                     if not msg or not msg.message:
                         continue
-                    m = re.search(r"Login code:\s*(\d{5})", msg.message, re.IGNORECASE) or re.search(r"\b(\d{5})\b", msg.message)
+                    m = re.search(r"Login code:\s*(\d{5,6})", msg.message, re.IGNORECASE) or (
+                        ("login" in msg.message.lower() or "code" in msg.message.lower()) and re.search(r"\b(\d{5,6})\b", msg.message)
+                    )
                     if m:
                         msg_ts = msg.date.timestamp() if hasattr(msg.date, "timestamp") else time.time()
-                        if time.time() - msg_ts < 1500:
+                        if time.time() - msg_ts < 900:
                             tg_code = m.group(1)
                             tg_date = msg_ts
                             tg_snippet = msg.message[:180]
@@ -2419,7 +2421,7 @@ async def get_account_otp(acc_target: str, request: Request):
                 "code": tg_code,
                 "password_2fa": password_2fa,
                 "source": "telegram_777000",
-                "age_seconds": age,
+                "age_seconds": max(0, age),
                 "snippet": tg_snippet
             }
 
@@ -2435,7 +2437,7 @@ async def get_account_otp(acc_target: str, request: Request):
                 status, msgs = mail.search(None, "ALL")
                 if status == "OK" and msgs[0]:
                     mail_ids = msgs[0].split()
-                    for mid in reversed(mail_ids[-6:]):
+                    for mid in reversed(mail_ids[-10:]):
                         s, data = mail.fetch(mid, "(RFC822)")
                         if s != "OK":
                             continue
@@ -2443,24 +2445,61 @@ async def get_account_otp(acc_target: str, request: Request):
                         subject = str(msg_obj.get("Subject", ""))
                         to_addr = str(msg_obj.get("To", ""))
                         from_addr = str(msg_obj.get("From", ""))
+                        date_hdr = msg_obj.get("Date", "")
 
-                        if "telegram" in from_addr.lower() or "telegram" in subject.lower():
-                            if f"+{target_idx}@" in to_addr or target_idx in [14, 16] or "code" in subject.lower():
-                                m = re.search(r"\b(\d{5,6})\b", subject)
-                                if m:
-                                    mail.logout()
-                                    return {
-                                        "ok": True,
-                                        "found": True,
-                                        "index": target_idx,
-                                        "name": name,
-                                        "phone": phone,
-                                        "code": m.group(1),
-                                        "password_2fa": password_2fa,
-                                        "source": "gmail_inbox",
-                                        "age_seconds": 60,
-                                        "snippet": subject
-                                    }
+                        msg_age = 999999
+                        if date_hdr:
+                            try:
+                                msg_dt = email_mod.utils.parsedate_to_datetime(date_hdr)
+                                msg_age = int(time.time() - msg_dt.timestamp())
+                            except Exception:
+                                pass
+
+                        # Must be fresh within 15 minutes (900 seconds)
+                        if msg_age > 900 or msg_age < -30:
+                            continue
+
+                        # Must be from Telegram
+                        if not ("telegram" in from_addr.lower() or "telegram" in subject.lower()):
+                            continue
+
+                        # Check recipient match
+                        is_target_recipient = False
+                        if f"+{target_idx}@" in to_addr:
+                            is_target_recipient = True
+                        elif target_idx in [1, 3, 4, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18] and "aaa.support.a" in to_addr:
+                            is_target_recipient = True
+
+                        if not is_target_recipient:
+                            continue
+
+                        # Extract 5 or 6 digit code
+                        m = re.search(r"code[:\s\-]+(\d{5,6})", subject, re.IGNORECASE) or re.search(r"\b(\d{5,6})\b", subject)
+                        if not m:
+                            body_text = ""
+                            if msg_obj.is_multipart():
+                                for part in msg_obj.walk():
+                                    if part.get_content_type() == "text/plain":
+                                        body_text = part.get_payload(decode=True).decode(errors="ignore")
+                                        break
+                            else:
+                                body_text = msg_obj.get_payload(decode=True).decode(errors="ignore")
+                            m = re.search(r"code[:\s\-]+(\d{5,6})", body_text, re.IGNORECASE) or re.search(r"\b(\d{5,6})\b", body_text)
+
+                        if m:
+                            mail.logout()
+                            return {
+                                "ok": True,
+                                "found": True,
+                                "index": target_idx,
+                                "name": name,
+                                "phone": phone,
+                                "code": m.group(1),
+                                "password_2fa": password_2fa,
+                                "source": "gmail_inbox",
+                                "age_seconds": max(0, msg_age),
+                                "snippet": subject
+                            }
                 mail.logout()
             except Exception as ge:
                 logger.debug(f"[OTP Cloud Fetch] Gmail IMAP check note: {ge}")
@@ -2472,7 +2511,7 @@ async def get_account_otp(acc_target: str, request: Request):
             "name": name,
             "phone": phone,
             "password_2fa": password_2fa,
-            "message": "No recent login code found. Request code in Telegram app first, then tap Check Again."
+            "message": "No active login code detected in last 15 minutes. Tap 'Fetch Code Now' after entering phone number in Telegram."
         }
     except Exception as exc:
         logger.error(f"[OTP Cloud Fetch] Error for {acc_target}: {exc}")
