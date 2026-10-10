@@ -2365,6 +2365,7 @@ FLEET_TON_CACHE = {}
 
 # In-memory TTL cache for Upstash passes to strictly stay within the 10,000 commands/day free limit
 UPSTASH_PASS_CACHE = {}
+UPSTASH_TOKENS_CACHE = {"data": {}, "ts": 0}
 
 def get_cached_upstash_pass(key: str):
     now = time.time()
@@ -2819,39 +2820,53 @@ async def fetch_cloud_miniapp_tokens(session: aiohttp.ClientSession) -> dict:
             except Exception:
                 pass
 
-    # Merge from Upstash Redis (fleet:tokens:*) via batched pipeline
+    # Merge from Upstash Redis (fleet:tokens:*) via batched pipeline (with 30-minute cache to protect 10k request limit)
+    global UPSTASH_TOKENS_CACHE
+    now_t = time.time()
     if UPSTASH_URL and UPSTASH_TOKEN:
-        try:
-            upstash_headers = {"Authorization": f"Bearer {UPSTASH_TOKEN}", "Content-Type": "application/json"}
-            async with session.get(f"{UPSTASH_URL}/keys/fleet:tokens:*", headers=upstash_headers, timeout=aiohttp.ClientTimeout(total=6)) as ur:
-                if ur.status == 200:
-                    uk = await ur.json()
-                    keys = uk.get("result", [])
-                    if keys:
-                        pipe_payload = [["get", k] for k in keys]
-                        async with session.post(f"{UPSTASH_URL}/pipeline", json=pipe_payload, headers=upstash_headers, timeout=aiohttp.ClientTimeout(total=6)) as pr:
-                            if pr.status == 200:
-                                pdata = await pr.json()
-                                for idx, item in enumerate(pdata):
-                                    res_str = item.get("result")
-                                    k = keys[idx]
-                                    if res_str:
-                                        try:
-                                            t_obj = json.loads(res_str) if isinstance(res_str, str) else res_str
-                                            acc_id = str(t_obj.get("account_id", k.split(":")[-1]))
-                                            if acc_id.isdigit():
-                                                if acc_id not in tokens_map:
-                                                    tokens_map[acc_id] = t_obj
-                                                else:
-                                                    if is_token_data_expired(tokens_map[acc_id]) and not is_token_data_expired(t_obj):
-                                                        tokens_map[acc_id] = {**tokens_map[acc_id], **t_obj}
+        if (now_t - UPSTASH_TOKENS_CACHE.get("ts", 0) < 1800) and UPSTASH_TOKENS_CACHE.get("data"):
+            for acc_id, t_obj in UPSTASH_TOKENS_CACHE["data"].items():
+                if acc_id not in tokens_map:
+                    tokens_map[acc_id] = t_obj
+                else:
+                    for tk, tv in t_obj.items():
+                        if tk not in tokens_map[acc_id] or not tokens_map[acc_id][tk]:
+                            tokens_map[acc_id][tk] = tv
+        else:
+            try:
+                upstash_headers = {"Authorization": f"Bearer {UPSTASH_TOKEN}", "Content-Type": "application/json"}
+                async with session.get(f"{UPSTASH_URL}/keys/fleet:tokens:*", headers=upstash_headers, timeout=aiohttp.ClientTimeout(total=6)) as ur:
+                    if ur.status == 200:
+                        uk = await ur.json()
+                        keys = uk.get("result", [])
+                        if keys:
+                            pipe_payload = [["get", k] for k in keys]
+                            async with session.post(f"{UPSTASH_URL}/pipeline", json=pipe_payload, headers=upstash_headers, timeout=aiohttp.ClientTimeout(total=6)) as pr:
+                                if pr.status == 200:
+                                    pdata = await pr.json()
+                                    cached_tokens = {}
+                                    for idx, item in enumerate(pdata):
+                                        res_str = item.get("result")
+                                        k = keys[idx]
+                                        if res_str:
+                                            try:
+                                                t_obj = json.loads(res_str) if isinstance(res_str, str) else res_str
+                                                acc_id = str(t_obj.get("account_id", k.split(":")[-1]))
+                                                if acc_id.isdigit():
+                                                    cached_tokens[acc_id] = t_obj
+                                                    if acc_id not in tokens_map:
+                                                        tokens_map[acc_id] = t_obj
                                                     else:
-                                                        for tk, tv in t_obj.items():
-                                                            if tk not in tokens_map[acc_id] or not tokens_map[acc_id][tk]:
-                                                                tokens_map[acc_id][tk] = tv
-                                        except Exception:
-                                            pass
-        except Exception as ue:
+                                                        if is_token_data_expired(tokens_map[acc_id]) and not is_token_data_expired(t_obj):
+                                                            tokens_map[acc_id] = {**tokens_map[acc_id], **t_obj}
+                                                        else:
+                                                            for tk, tv in t_obj.items():
+                                                                if tk not in tokens_map[acc_id] or not tokens_map[acc_id][tk]:
+                                                                    tokens_map[acc_id][tk] = tv
+                                            except Exception:
+                                                pass
+                                    UPSTASH_TOKENS_CACHE = {"data": cached_tokens, "ts": now_t}
+            except Exception as ue:
             logger.warning(f"Upstash token merge error: {ue}")
 
     return tokens_map
@@ -3446,17 +3461,18 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
         should_farm = True
         if not force:
             try:
-                last_farm_raw = None
-                if UPSTASH_URL and UPSTASH_TOKEN:
+                # 1. Check local in-memory cache FIRST (saves 99% of Upstash calls)
+                last_farm_raw = FLEET_LAST_FARM_CACHE.get(f"{b_name}:{uid}")
+                if not last_farm_raw and UPSTASH_URL and UPSTASH_TOKEN:
                     try:
-                        async with session.get(f"{UPSTASH_URL}/get/{cd_key}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=2.0)) as u_resp:
+                        async with session.get(f"{UPSTASH_URL}/get/{cd_key}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=aiohttp.ClientTimeout(total=1.5)) as u_resp:
                             if u_resp.status == 200:
                                 u_data = await u_resp.json()
                                 last_farm_raw = u_data.get("result")
+                                if last_farm_raw:
+                                    FLEET_LAST_FARM_CACHE[f"{b_name}:{uid}"] = last_farm_raw
                     except Exception:
                         pass
-                if not last_farm_raw:
-                    last_farm_raw = FLEET_LAST_FARM_CACHE.get(f"{b_name}:{uid}")
 
                 if last_farm_raw:
                     try:
