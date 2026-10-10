@@ -547,20 +547,6 @@ async def collect_tokens(request: Request):
         async def _collect_single(acc):
             async with sem:
                 uid = str(acc.get("user_id"))
-                sess_str = acc.get("session_string") or acc.get("session")
-                if sess_str and not is_account_referrals_bound(acc) and uid != "6727787768":
-                    try:
-                        cl = TelegramClient(StringSession(sess_str), API_ID, API_HASH)
-                        await cl.connect()
-                        if await cl.is_user_authorized():
-                            await bind_account_master_referrals(cl, acc)
-                        try:
-                            await cl.disconnect()
-                        except Exception:
-                            pass
-                    except Exception as be:
-                        logger.warning(f"[{acc.get('name', uid)}] Referral binding in collect_tokens note: {be}")
-
                 tokens = await extract_tokens_for_account(acc)
                 if tokens:
                     act_uid = str(tokens.get("account_id") or acc.get("user_id") or uid)
@@ -1622,9 +1608,11 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
             await sync_account_tokens_to_clouds(tokens)
         return
 
-    # STRICT GUARD: If account already has referrals bound, NEVER send /start messages!
-    if is_account_referrals_bound(acc_entry):
-        logger.info(f"[{name}] Master referrals already bound previously. Skipping referral /start messages.")
+    # STRICT GUARD: Existing accounts in fleet ALREADY joined all bots!
+    # All ongoing work is 100% via Mini App REST APIs, NEVER Telegram bot chats.
+    # /start is strictly and exclusively for brand new onboarding accounts (is_new_onboarding == True).
+    if not acc_entry.get("is_new_onboarding") or is_account_referrals_bound(acc_entry):
+        logger.info(f"[{name}] Existing fleet account ({uid}) already joined. Skipping all bot chat messages.")
         tokens = {}
         try:
             if not client.is_connected():
@@ -3823,10 +3811,8 @@ async def inspect_referrals_master(request: Request):
         for name, b_user, cmds in bots_to_query:
             try:
                 b_ent = await cl.get_entity(b_user)
-                sent_cmd = cmds[0]
-                await cl.send_message(b_ent, sent_cmd)
-                await asyncio.sleep(2.0)
-                msgs = await cl.get_messages(b_ent, limit=3)
+                # Zero-chat policy: do NOT send /start into bot chats! Read existing messages silently.
+                msgs = await cl.get_messages(b_ent, limit=5)
                 replies = []
                 for m in msgs:
                     if not m.out:
@@ -3893,9 +3879,7 @@ async def study_bot_deep(cl: TelegramClient, bot_key: str, bot_username: str) ->
                 "buttons": [[b.text for b in row] for row in m.buttons] if m.buttons else []
             })
 
-        await cl.send_message(bot_ent, "/start")
-        await asyncio.sleep(2.5)
-
+        # Zero-chat policy: do NOT send /start into bot chats! Inspect existing messages silently.
         fresh_msgs = await cl.get_messages(bot_ent, limit=8)
         check_keywords = ["check", "verify", "continue", "joined", "confirm", "done"]
         for m in fresh_msgs:
@@ -3964,22 +3948,11 @@ async def study_bot_deep(cl: TelegramClient, bot_key: str, bot_username: str) ->
         flat_reply_btns = [b for row in reply_keyboard_found for b in row]
         for btn_text in flat_reply_btns:
             if any(k in btn_text.lower() for k in action_keywords):
-                try:
-                    await cl.send_message(bot_ent, btn_text)
-                    await asyncio.sleep(2.0)
-                    new_msgs = await cl.get_messages(bot_ent, limit=2)
-                    resp_text = new_msgs[0].raw_text if new_msgs and not new_msgs[0].out else "no reply"
-                    tested_actions.append({
-                        "type": "reply_keyboard_send",
-                        "button": btn_text,
-                        "response": resp_text
-                    })
-                except Exception as e:
-                    tested_actions.append({
-                        "type": "reply_keyboard_send",
-                        "button": btn_text,
-                        "error": str(e)
-                    })
+                tested_actions.append({
+                    "type": "reply_keyboard_found",
+                    "button": btn_text,
+                    "status": "passive_recorded"
+                })
 
         for btn in inline_buttons_found:
             b_text = btn.get("text", "")
