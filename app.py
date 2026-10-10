@@ -2380,13 +2380,13 @@ async def get_account_otp(acc_target: str, request: Request):
             return {"ok": False, "found": False, "error": f"No active session string for {name} ({phone})"}
 
         # 1. Check active MTProto Telegram session peer 777000
-        client = TelegramClient(StringSession(sess), API_ID, API_HASH, timeout=12)
-        await client.connect()
-
+        client = None
         tg_code = None
         tg_date = None
         tg_snippet = ""
         try:
+            client = TelegramClient(StringSession(sess), API_ID, API_HASH, timeout=12)
+            await client.connect()
             if await client.is_user_authorized():
                 messages = await client.get_messages(777000, limit=5)
                 for msg in messages:
@@ -2405,10 +2405,11 @@ async def get_account_otp(acc_target: str, request: Request):
         except Exception as e:
             logger.warning(f"[OTP Cloud Fetch] 777000 check note for #{target_idx}: {e}")
         finally:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
+            if client:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
         if tg_code:
             age = int(time.time() - tg_date)
@@ -2427,7 +2428,7 @@ async def get_account_otp(acc_target: str, request: Request):
 
         # 2. Fallback: Check Gmail IMAP if configured
         gmail_user = os.getenv("GMAIL_ADDRESS", "aaa.support.a@gmail.com")
-        gmail_pass = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+        gmail_pass = os.getenv("GMAIL_APP_PASSWORD", "kuqevwndvabevefx").strip()
         if gmail_pass:
             try:
                 import imaplib, email as email_mod
