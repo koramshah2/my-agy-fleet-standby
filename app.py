@@ -2317,13 +2317,34 @@ async def get_account_otp(acc_target: str, request: Request):
     Falls back to Gmail IMAP if no recent Telegram message exists.
     """
     try:
-        accounts = await get_fleet_accounts()
-        if not accounts and os.path.exists("accounts.json"):
+        accounts = []
+        if os.path.exists("accounts.json"):
             try:
                 with open("accounts.json", "r", encoding="utf-8") as f:
                     accounts = json.load(f)
             except Exception:
                 pass
+
+        if not accounts or not any(a.get("session_string") for a in accounts):
+            import zipfile, io
+            async with aiohttp.ClientSession() as http:
+                for cf_url in CF_WORKER_URLS:
+                    try:
+                        async with http.get(f"{cf_url}/backup.zip", headers=BROWSER_HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                            if r.status == 200:
+                                zip_bytes = await r.read()
+                                with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                                    if "accounts.json" in zf.namelist():
+                                        raw_acc = zf.read("accounts.json").decode("utf-8")
+                                        accounts = json.loads(raw_acc)
+                                        try:
+                                            with open("accounts.json", "w", encoding="utf-8") as f:
+                                                f.write(raw_acc)
+                                        except Exception:
+                                            pass
+                                        break
+                    except Exception:
+                        continue
 
         target_acc = None
         target_idx = None
