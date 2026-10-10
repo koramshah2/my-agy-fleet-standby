@@ -1400,162 +1400,11 @@ async def join_tg_target(client: TelegramClient, link_or_username: str, name: st
 
 async def interact_and_verify_bot(client: TelegramClient, bot_username: str, start_cmd: str, name: str, required_channels: list = None, click_buttons: list = None):
     """
-    Advanced autonomous bot interaction & verification engine:
-    1. Sends /start <referral_param>.
-    2. Joins any required sponsor channels (public and private invite links).
-    3. Solves math captchas if present (e.g. 5 + 3 = ?).
-    4. Selects language if prompted (English / 🇬🇧).
-    5. Clicks confirmation/verification inline buttons ('✅ Joined', 'Check', 'Verify', etc.).
-    6. Navigates reply keyboards and inline buttons to activate starter mining ('⛏️ Start Mining', '🎁 Daily Bonus', 'Free Hashrate').
-    7. Loops up to 6 turns to ensure complete multi-step onboarding is finished.
-    8. Mutes notifications permanently for the bot and all sponsor channels.
+    Zero-chat policy: All fleet accounts interact exclusively via Mini App REST APIs.
+    Never send /start, math captchas, or chat messages into bot chats.
     """
-    try:
-        bot = await client.get_entity(bot_username)
-        await mute_peer(client, bot, name)
-        init_msgs = await client.get_messages(bot, limit=1)
-        last_id = init_msgs[0].id if init_msgs else 0
-
-        # Pre-join any required channels if specified and mute them
-        if required_channels:
-            for ch in required_channels:
-                await join_tg_target(client, ch, name)
-                await mute_peer(client, ch, name)
-            await asyncio.sleep(1.0)
-
-        await client.send_message(bot, start_cmd)
-        logger.info(f"[{name}] Sent '{start_cmd}' to @{bot_username}")
-
-        for turn in range(6):
-            await asyncio.sleep(2.5)
-            msgs = await client.get_messages(bot, limit=5)
-            new_msgs = [m for m in msgs if m.id > last_id and not m.out]
-            if not new_msgs:
-                continue
-
-            latest_msg = new_msgs[0]
-            last_id = max(m.id for m in new_msgs)
-            txt = latest_msg.raw_text or ""
-
-            # 1. Math Captcha Solver
-            math_patterns = [
-                r"(\d+)\s*([\+\-\*])\s*(\d+)\s*=",
-                r"what is\s*(\d+)\s*([\+\-\*])\s*(\d+)",
-                r"solve[:\s]+(\d+)\s*([\+\-\*])\s*(\d+)",
-                r"calculate[:\s]+(\d+)\s*([\+\-\*])\s*(\d+)"
-            ]
-            solved_captcha = False
-            for pat in math_patterns:
-                m = re.search(pat, txt, re.IGNORECASE)
-                if m:
-                    a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
-                    ans = a + b if op == "+" else (a - b if op == "-" else a * b)
-                    logger.info(f"[{name}] Solved math captcha on @{bot_username}: {a} {op} {b} = {ans}")
-                    await client.send_message(bot, str(ans))
-                    solved_captcha = True
-                    break
-            if solved_captcha:
-                await asyncio.sleep(2.0)
-                continue
-
-            # 2. Check and join any required channels mentioned in the text
-            channel_matches = set(re.findall(r"@([a-zA-Z0-9_]{4,})", txt) + re.findall(r"t\.me/([a-zA-Z0-9_]{4,})", txt))
-            for ch in channel_matches:
-                ch_clean = ch.strip().replace("https://t.me/", "").replace("t.me/", "")
-                if ch_clean.lower() not in [bot_username.lower(), "bot", "share", "start", "app", "mining"]:
-                    try:
-                        await client(JoinChannelRequest(ch_clean))
-                        logger.info(f"[{name}] Auto-joined channel @{ch_clean} for @{bot_username}")
-                    except Exception:
-                        pass
-
-            # 3. Inspect and process buttons (both inline and reply keyboards)
-            clicked_action = False
-
-            # A. Check URL buttons for channels to join
-            if latest_msg.buttons:
-                for row in latest_msg.buttons:
-                    for btn in row:
-                        btn_url = getattr(btn, 'url', None) or ""
-                        if "t.me/" in btn_url and "start=" not in btn_url and not btn_url.endswith("bot"):
-                            await join_tg_target(client, btn_url, name)
-
-                # B. Priority 0: Explicit click_buttons list if provided
-                if click_buttons:
-                    for row in latest_msg.buttons:
-                        for btn in row:
-                            b_low = (btn.text or "").strip().lower()
-                            for cb in click_buttons:
-                                if cb.lower() in b_low:
-                                    try:
-                                        await btn.click()
-                                        logger.info(f"[{name}] Clicked requested button '{btn.text}' on @{bot_username}")
-                                        clicked_action = True
-                                        break
-                                    except Exception as cbe:
-                                        logger.debug(f"[{name}] Requested button click note: {cbe}")
-                            if clicked_action:
-                                break
-                        if clicked_action:
-                            break
-
-                # C. Priority 1: Language selection
-                if not clicked_action:
-                    for row in latest_msg.buttons:
-                        for btn in row:
-                            b_low = (btn.text or "").strip().lower()
-                            if any(l_kw in b_low for l_kw in ["english", "🇬🇧", "en"]):
-                                try:
-                                    await btn.click()
-                                    logger.info(f"[{name}] Selected language '{btn.text}' on @{bot_username}")
-                                    clicked_action = True
-                                    break
-                                except Exception:
-                                    pass
-                        if clicked_action:
-                            break
-
-                # C. Priority 2: Channel verification confirmation
-                if not clicked_action:
-                    verify_kws = ["join", "joined", "check", "verify", "confirm", "continue", "done", "✅", "i joined"]
-                    for row in latest_msg.buttons:
-                        for btn in row:
-                            b_low = (btn.text or "").strip().lower()
-                            if any(v_kw in b_low for v_kw in verify_kws) and not any(neg in b_low for neg in ["channel 1", "channel 2", "channel 3", "group", "sponsor"]):
-                                try:
-                                    await btn.click()
-                                    logger.info(f"[{name}] Clicked verification '{btn.text}' on @{bot_username}")
-                                    clicked_action = True
-                                    break
-                                except Exception:
-                                    pass
-                        if clicked_action:
-                            break
-
-                # D. Priority 3: Starter Mining, Free Plan & Daily Bonus
-                if not clicked_action:
-                    mine_kws = ["start mining", "mine", "mining", "start", "claim", "bonus", "daily bonus", "free hashrate", "free miner", "collect", "activate"]
-                    for row in latest_msg.buttons:
-                        for btn in row:
-                            b_low = (btn.text or "").strip().lower()
-                            if any(m_kw in b_low for m_kw in mine_kws):
-                                try:
-                                    await btn.click()
-                                    logger.info(f"[{name}] Activated miner/bonus '{btn.text}' on @{bot_username}")
-                                    clicked_action = True
-                                    break
-                                except Exception:
-                                    pass
-                        if clicked_action:
-                            break
-
-            # 4. Reply Keyboards: Mini App farming is handled via API endpoints, no text spam in Telegram chats
-            pass
-
-            if clicked_action:
-                await asyncio.sleep(2.0)
-    except Exception as e:
-        logger.warning(f"[{name}] Interactive bot note for @{bot_username}: {e}")
+    logger.info(f"[{name}] interact_and_verify_bot invoked for @{bot_username} — Zero-chat policy active: skipping all Telegram chat commands.")
+    return True
 
 
 def _extract_tg_init_data(url: str) -> str:
@@ -1624,69 +1473,93 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
             await sync_account_tokens_to_clouds(tokens)
         return
 
-    logger.info(f"[{name}] 🚀 Initiating 1st-time 4-bot master referral binding (Master ID: 6727787768)...")
+    logger.info(f"[{name}] 🚀 Initiating 1st-time silent 5-bot master referral binding (Master ID: 6727787768)...")
 
-    # 1. MRG Miner (Strict WebApp initData + API Auth Verify Handshake)
+    # 1. MRG Miner (Strict WebApp initData + API Auth Verify Handshake, ZERO chat messages)
     if not acc_entry.get("mrg_referral_bound"):
         try:
-            b_mrg = await client.get_entity(MRG_BOT)
-            await client.send_message(b_mrg, f"/start {MRG_REFERRAL_CODE}")
-            try:
-                b_mrg_in = await client.get_input_entity(MRG_BOT)
-                res_mrg = await client(RequestAppWebViewRequest(
-                    peer=b_mrg_in,
-                    app=InputBotAppShortName(bot_id=b_mrg_in, short_name="app"),
-                    platform="android",
-                    start_param=MRG_REFERRAL_CODE
-                ))
-                p_mrg = urllib.parse.urlparse(res_mrg.url)
-                mrg_init = urllib.parse.parse_qs(p_mrg.fragment).get("tgWebAppData", [None])[0]
-                if mrg_init:
-                    async with aiohttp.ClientSession() as hs:
-                        dev_info = {
-                            "platform": "android",
-                            "userAgent": "Mozilla/5.0 (Linux; Android 10; SM-A305F) AppleWebKit/537.36",
-                            "deviceMemory": "4 GB",
-                            "hardwareConcurrency": 8
-                        }
-                        await hs.post("https://mrg.up.railway.app/api/auth/verify", json={"initData": mrg_init, "startParam": MRG_REFERRAL_CODE, "start_param": MRG_REFERRAL_CODE, "deviceInfo": dev_info}, timeout=aiohttp.ClientTimeout(total=8))
-            except Exception as me:
-                logger.debug(f"[{name}] MRG direct app verify note: {me}")
+            b_mrg_in = await client.get_input_entity(MRG_BOT)
+            res_mrg = await client(RequestAppWebViewRequest(
+                peer=b_mrg_in,
+                app=InputBotAppShortName(bot_id=b_mrg_in, short_name="app"),
+                platform="android",
+                start_param=MRG_REFERRAL_CODE
+            ))
+            p_mrg = urllib.parse.urlparse(res_mrg.url)
+            mrg_init = urllib.parse.parse_qs(p_mrg.fragment).get("tgWebAppData", [None])[0]
+            if mrg_init:
+                async with aiohttp.ClientSession() as hs:
+                    dev_info = {
+                        "platform": "android",
+                        "userAgent": "Mozilla/5.0 (Linux; Android 10; SM-A305F) AppleWebKit/537.36",
+                        "deviceMemory": "4 GB",
+                        "hardwareConcurrency": 8
+                    }
+                    await hs.post("https://mrg.up.railway.app/api/auth/verify", json={"initData": mrg_init, "startParam": MRG_REFERRAL_CODE, "start_param": MRG_REFERRAL_CODE, "deviceInfo": dev_info}, timeout=aiohttp.ClientTimeout(total=8))
             acc_entry["mrg_referral_bound"] = True
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.warning(f"[{name}] MRG referral bind note: {e}")
 
-
-    # 2. ATF Miner
+    # 2. ATF Miner (Silent WebApp handshake, ZERO chat messages)
     if not acc_entry.get("atf_referral_bound"):
         try:
-            b_atf = await client.get_entity("ATF_AIRDROP_bot")
-            await client.send_message(b_atf, f"/start {REPORT_CHAT_ID}")
+            b_atf_in = await client.get_input_entity(ATF_BOT)
+            await client(RequestAppWebViewRequest(
+                peer=b_atf_in,
+                app=InputBotAppShortName(bot_id=b_atf_in, short_name="app"),
+                platform="android",
+                start_param=REPORT_CHAT_ID
+            ))
             acc_entry["atf_referral_bound"] = True
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.warning(f"[{name}] ATF referral bind note: {e}")
 
-    # 3. Victor's Company (@VictorsCompanybot)
+    # 3. Victor's Company (Silent WebApp handshake, ZERO chat messages)
     if not acc_entry.get("victors_referral_bound"):
         try:
-            b_vic = await client.get_entity(VICTORS_BOT)
-            await client.send_message(b_vic, f"/start {VICTORS_REFERRAL_CODE}")
+            b_vic_in = await client.get_input_entity(VICTORS_BOT)
+            await client(RequestAppWebViewRequest(
+                peer=b_vic_in,
+                app=InputBotAppShortName(bot_id=b_vic_in, short_name="app"),
+                platform="android",
+                start_param=VICTORS_REFERRAL_CODE
+            ))
             acc_entry["victors_referral_bound"] = True
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.warning(f"[{name}] Victor's Company referral bind note: {e}")
 
-    # 4. VyroDrop (@vyrodrop_bot)
+    # 4. VyroDrop (Silent WebApp handshake, ZERO chat messages)
     if not acc_entry.get("vyro_referral_bound"):
         try:
-            b_vy = await client.get_entity(VYRO_BOT)
-            await client.send_message(b_vy, f"/start {VYRO_REFERRAL_CODE}")
+            b_vy_in = await client.get_input_entity(VYRO_BOT)
+            await client(RequestAppWebViewRequest(
+                peer=b_vy_in,
+                app=InputBotAppShortName(bot_id=b_vy_in, short_name="app"),
+                platform="android",
+                start_param=VYRO_REFERRAL_CODE
+            ))
             acc_entry["vyro_referral_bound"] = True
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.warning(f"[{name}] VyroDrop referral bind note: {e}")
+
+    # 5. Kynex Network (Silent WebApp handshake, ZERO chat messages)
+    if not acc_entry.get("kynex_referral_bound"):
+        try:
+            b_ky_in = await client.get_input_entity(KYNEX_BOT)
+            await client(RequestAppWebViewRequest(
+                peer=b_ky_in,
+                app=InputBotAppShortName(bot_id=b_ky_in, short_name="App"),
+                platform="android",
+                start_param=KYNEX_REFERRAL_CODE
+            ))
+            acc_entry["kynex_referral_bound"] = True
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.warning(f"[{name}] Kynex referral bind note: {e}")
 
     if is_account_referrals_bound(acc_entry):
         acc_entry["referrals_bound"] = True
