@@ -1788,19 +1788,19 @@ async def bind_account_master_referrals(client: TelegramClient, acc_entry: dict)
                 await bind_wallets_to_bots(s, acc_entry, tokens)
         except Exception as wbe:
             logger.warning(f"[{name}] Wallet binding note: {wbe}")
-        # Bootstrap initial WebApp mining across all 7 legitimate bots (completes referral onboarding finish work)
+        # Bootstrap initial WebApp mining across all 5 legitimate bots (completes referral onboarding finish work)
         await bootstrap_account_mining(acc_entry, tokens)
-        # Immediately execute complete 7-bot farming (all tasks, claims, spins, ads, math challenges)
+        # Immediately execute complete 5-bot farming (all tasks, claims, spins, ads, math challenges)
         try:
             async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}) as s:
                 await farm_single_account_bots(s, acc_entry, tokens)
-                logger.info(f"[{name}] ✅ Complete initial 7-bot farming & referral finish work finished!")
+                logger.info(f"[{name}] ✅ Complete initial 5-bot farming & referral finish work finished!")
         except Exception as fse:
             logger.error(f"[{name}] Initial farming note: {fse}")
 
     # Save updated referrals_bound flags across clouds
     await sync_new_account_to_clouds(acc_entry)
-    logger.info(f"[{name}] 🚀 Master Fleet Onboarding & Referral Finish Work Active (7/7 Legitimate Bots) for account {uid}")
+    logger.info(f"[{name}] 🚀 Master Fleet Onboarding & Referral Finish Work Active (5/5 Legitimate Bots) for account {uid}")
 
 
 def keccak_256(data: bytes) -> bytes:
@@ -3616,7 +3616,7 @@ async def farm_single_account_bots(session: aiohttp.ClientSession, acc: dict, ac
 
 
 async def run_cloud_fleet_farming_cycle(session: aiohttp.ClientSession = None, accounts: list = None, tokens_map: dict = None) -> dict:
-    """Executes full autonomous cloud farming and task completions across all 7 legitimate bots for all fleet accounts."""
+    """Executes full autonomous cloud farming and task completions across all 5 legitimate bots for all fleet accounts."""
     created_session = False
     if session is None:
         session = aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
@@ -4511,7 +4511,7 @@ async def channel_status_endpoint(request: Request):
 async def sync_and_verify_channels_endpoint(request: Request):
     """
     Type B Channel & Bot Management Engine:
-    Ensures all fleet accounts join mandatory sponsor channels, unblock all 7 legitimate bots,
+    Ensures all fleet accounts join mandatory sponsor channels, unblock all 5 legitimate bots,
     and permanently mute all channels/bots to prevent notification spam.
     Protects against Telegram's 500-channel limit by leaving unwhitelisted spam channels if dialogs > 400.
     """
