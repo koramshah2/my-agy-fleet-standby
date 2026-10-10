@@ -1221,9 +1221,11 @@ async def sync_account_tokens_to_clouds(tokens: dict):
                         if raw_res:
                             ex_toks = json.loads(raw_res) if isinstance(raw_res, str) else raw_res
                 merged = {**ex_toks, **tokens}
+                ALLOWED_KEYS = {"account_id", "name", "synced_at", "mrg_init_data", "atf_init_data", "victors_init_data", "vyro_init_data", "kynex_init_data"}
+                clean_merged = {k: v for k, v in merged.items() if k in ALLOWED_KEYS}
                 await s.post(
                     f"{UPSTASH_URL}/set/fleet:tokens:{uid}",
-                    data=json.dumps(merged),
+                    data=json.dumps(clean_merged),
                     headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
                     timeout=aiohttp.ClientTimeout(total=5)
                 )
